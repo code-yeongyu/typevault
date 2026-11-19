@@ -21,6 +21,7 @@ import {
 import { findLocalVault, globalLayout, type Layout, localLayout } from '../core/layout'
 import type { EntryName } from '../core/naming'
 import { loadState } from '../core/state'
+import { touchIdAvailable } from '../core/touch-id'
 import { Vault } from '../core/vault'
 import { worktreeVaults } from '../core/worktrees'
 import { callDaemon, isDaemonAlive } from '../daemon/client'
@@ -75,11 +76,17 @@ export async function openDirect(env: Env): Promise<Vault> {
 /**
  * A person's member key: through Touch ID when they turned it on and are at this Mac's terminal, else (or when Touch
  * ID fails) their password. Without a terminal it stays the password's error, so an agent can't raise the dialog.
+ * At a Mac with Touch ID that they haven't turned on, the password prompt suggests it.
  */
 export async function unlockHuman(env: Env, identity: Identity | undefined, passwords: Passwords): Promise<SecretKey> {
   if (identity === undefined) throw new TypeVaultError('not_found', 'no identity here (run typevault init or join)')
   if (identity.kind === 'machine') return unlockIdentity(identity)
-  if (identity.touchId !== undefined && process.platform === 'darwin' && process.stdin.isTTY && !passwordsFromStdin()) {
+  const atThisMac = process.platform === 'darwin' && process.stdin.isTTY === true && !passwordsFromStdin()
+  if (identity.touchId === undefined) {
+    // The tip is optional: a probe that fails must not stand between the person and their password prompt.
+    const tip = atThisMac && (await touchIdAvailable().catch(() => false))
+    if (tip) note('tip: skip the password next time with `typevault touch-id enable`')
+  } else if (atThisMac) {
     try {
       return await unlockIdentityWithTouchId(env, identity, identity.touchId)
     } catch (error) {

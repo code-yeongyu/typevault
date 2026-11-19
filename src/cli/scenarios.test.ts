@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { z } from 'zod'
 
+import { PACKAGE_VERSION } from '../core/version'
 import { LiveAccess } from '../daemon/live-access'
 import {
   actor,
@@ -203,3 +204,10 @@ it(
   },
   SCENARIO_MS,
 )
+
+it('prints the installed version for --version and -v, and in the --help header', async () => {
+  const alice = actor('alice')
+  expect((await ok(alice, ['--version'])).stdout).toBe(`${PACKAGE_VERSION}\n`)
+  expect((await ok(alice, ['-g', '-v'])).stdout).toBe(`${PACKAGE_VERSION}\n`)
+  expect((await ok(alice, ['--help'])).stdout).toContain(`typevault v${PACKAGE_VERSION}`)
+})

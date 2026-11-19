@@ -159,12 +159,17 @@ export function signCiphertext(
 ): Envelope {
   const tier = state.tiers[draft.tier]
   if (tier === undefined) throw new TypeVaultError('not_found', `no tier "${draft.tier}"`)
-  if (signerAuthority(signer.ref, draft.tier, state, draft.at) === undefined) {
+  const authority = signerAuthority(signer.ref, draft.tier, state, draft.at)
+  if (authority === undefined) {
     throw new TypeVaultError('denied', `this key cannot sign entries in tier "${draft.tier}"`)
   }
   const unsigned = { v: 1 as const, id: draft.id, tier: draft.tier, gen: tier.gen, rev: draft.rev, at: draft.at }
   const envelope = { ...unsigned, payload: toBase64(ciphertext), signer: signer.ref }
-  return { ...envelope, sig: sign(signer.signSecret, envelopeBytes(envelope)) }
+  const message = envelopeBytes(envelope)
+  const sig = sign(signer.signSecret, message)
+  if (!verifySignature(authority, message, sig))
+    throw new TypeVaultError('denied', 'this signing key no longer has authority in the vault')
+  return { ...envelope, sig }
 }
 
 const CLOCK_SKEW_MS = 5 * 60_000

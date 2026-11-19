@@ -2,6 +2,7 @@
 import { defineCommand, runCommand, runMain } from 'citty'
 
 import { TypeVaultError } from '../core/errors'
+import { PACKAGE_VERSION } from '../core/version'
 import { ceiling, doctor, tier, init, key, signer } from './commands/admin'
 import { daemon } from './commands/daemon'
 import { get, ls, mv, otp, rm, set, whoami } from './commands/entries'
@@ -11,7 +12,7 @@ import { importCommand, redact, request, run, scrub } from './commands/run'
 import { readPasswordsFromStdin } from './password'
 
 const main = defineCommand({
-  meta: { name: 'typevault', description: 'A CLI-first secrets vault for agents' },
+  meta: { name: 'typevault', version: PACKAGE_VERSION, description: 'A CLI-first secrets vault for agents' },
   args: {
     global: { type: 'boolean', alias: 'g', description: 'Use the global vault instead of the project vault' },
     'vault-password-stdin': {
@@ -62,9 +63,10 @@ if (argv.slice(0, split).includes(PASSWORD_STDIN)) readPasswordsFromStdin()
 const ownArgs = argv.slice(0, split).filter((arg) => !isGlobalFlag(arg) && arg !== PASSWORD_STDIN)
 const rawArgs = [...ownArgs, ...argv.slice(split)]
 const wantsUsage = ownArgs.length === 0 || ownArgs.some((arg) => arg === '--help' || arg === '-h')
+const wantsVersion = ownArgs.length === 1 && (ownArgs[0] === '--version' || ownArgs[0] === '-v')
 
-if (wantsUsage) {
-  await runMain(main)
+if (wantsUsage || wantsVersion) {
+  await runMain(main, { rawArgs: ownArgs })
 } else {
   try {
     // no-excuse-ok: catch (top-level CLI boundary turns typed errors into a one-line message)

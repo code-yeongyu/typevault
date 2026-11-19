@@ -145,7 +145,8 @@ they lock it; a machine member's daemon starts on its own.
 
 - **No vault found**: you're outside a project. Run `typevault init` there, or use `-g` for the global vault.
 - **The vault is locked**: ask the user to run `typevault unlock` in their terminal. Never ask for their password,
-  and never pipe one with `--vault-password-stdin`.
+  and never pipe one with `--vault-password-stdin`. If they're on a Mac with Touch ID and haven't turned it on
+  for TypeVault yet, suggest `typevault touch-id enable` once, so later unlocks take a touch instead of the password.
 - **`... the global vault has it: rerun with -g`**: the entry is in the global vault, not the project's. Rerun the
   same command with `-g`.
 - **Entry not listed**: your grant doesn't reach its tier. Ask the owner for a grant that does; don't work around

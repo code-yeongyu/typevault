@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it, mock } from 'bun:test'
+import { afterEach, beforeEach, expect, it, mock, spyOn } from 'bun:test'
 
 import { p256 } from '@noble/curves/nist.js'
 
@@ -11,7 +11,12 @@ import type { Passwords } from './password'
 let enclaveSecret = p256.utils.randomSecretKey()
 let touchOutcome: 'touched' | TypeVaultError = 'touched'
 let touches = 0
+let sensor: boolean | Error = true
 mock.module('../core/secure-enclave', () => ({
+  hasTouchId: () => {
+    if (sensor instanceof Error) throw sensor
+    return sensor
+  },
   createEnclaveKey: () => {
     enclaveSecret = p256.utils.randomSecretKey()
     return { handle: new Uint8Array([7]), publicKey: p256.getPublicKey(enclaveSecret, false) }
@@ -58,6 +63,7 @@ beforeEach(async () => {
   touches = 0
   asked = 0
   fromStdin = false
+  sensor = true
   setPlatform('darwin')
   setTerminal(true)
 })
@@ -90,6 +96,37 @@ it('asks for the password when Touch ID is cancelled or the enclave key no longe
     // then the password opens it instead
     expect(await publicKeyOf(key)).toEqual(alicePublic)
     expect({ touches, asked }).toEqual({ touches: 1, asked: 1 })
+  }
+})
+
+it('suggests turning on Touch ID only at a Mac with a sensor where it is off', async () => {
+  const { touchId: _, ...withoutTouchId } = alice as Identity & { touchId?: unknown }
+  const cases: readonly [string, Identity, () => void, boolean][] = [
+    ['off, with a sensor', withoutTouchId as Identity, () => {}, true],
+    ['already on', alice, () => {}, false],
+    ['no sensor', withoutTouchId as Identity, () => (sensor = false), false],
+    ['a probe that fails', withoutTouchId as Identity, () => (sensor = new Error('no LAContext')), false],
+    ['no terminal', withoutTouchId as Identity, () => setTerminal(false), false],
+    ['passwords on stdin', withoutTouchId as Identity, () => (fromStdin = true), false],
+  ]
+  for (const [name, identity, arrange, hinted] of cases) {
+    // given
+    sensor = true
+    fromStdin = false
+    setTerminal(true)
+    arrange()
+    const stderr = spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+    // when
+    let written = ''
+    const key = await unlockHuman({}, identity, password).finally(() => {
+      written = stderr.mock.calls.map(([text]) => String(text)).join('')
+      stderr.mockRestore()
+    })
+
+    // then
+    expect(await publicKeyOf(key)).toEqual(alicePublic)
+    expect([name, written.includes('typevault touch-id enable')]).toEqual([name, hinted])
   }
 })
 

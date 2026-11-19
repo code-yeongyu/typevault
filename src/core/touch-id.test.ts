@@ -12,6 +12,7 @@ const plaintext = new Uint8Array([1, 2, 3])
 let enclaveSecret = p256.utils.randomSecretKey()
 const touchReasons: string[] = []
 mock.module('./secure-enclave', () => ({
+  hasTouchId: () => true,
   createEnclaveKey: () => {
     enclaveSecret = p256.utils.randomSecretKey()
     return { handle: new Uint8Array([7]), publicKey: p256.getPublicKey(enclaveSecret, false) }

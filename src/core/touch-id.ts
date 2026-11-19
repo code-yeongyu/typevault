@@ -75,6 +75,12 @@ export async function enableTouchId(env: Env, plaintext: Uint8Array): Promise<To
   return seal
 }
 
+/** Whether this Mac could unlock with Touch ID: a sensor and an enrolled finger. Shows no dialog. */
+export async function touchIdAvailable(): Promise<boolean> {
+  const { hasTouchId } = await import('./secure-enclave')
+  return hasTouchId()
+}
+
 export async function openWithTouchId(env: Env, seal: TouchIdSeal, reason = 'unlock your vault'): Promise<Uint8Array> {
   const { exchangeWithEnclave } = await import('./secure-enclave')
   return openFromEnclave(seal, (handle, ephemeral) => exchangeWithEnclave(env, handle, ephemeral, reason))

@@ -29,6 +29,7 @@ const CF_NUMBER_SINT32 = 3
 const ACCESS_PRIVATE_KEY_USAGE = 1 << 30
 const ACCESS_BIOMETRY_CURRENT_SET = 1 << 3
 const TOKEN_OBJECT_ID = 'toid'
+const POLICY_BIOMETRICS = 1
 /** errSecUserCanceled and LAErrorUserCancel / LAErrorSystemCancel / LAErrorAppCancel. */
 const CANCELLED = new Set([-128, -2, -4, -9])
 
@@ -40,6 +41,14 @@ export function createEnclaveKey(): EnclaveKey {
   const attributes = check(sec.SecKeyCopyAttributes(key), 'read the Secure Enclave key')
   const handle = check(cf.CFDictionaryGetValue(attributes, cfString(TOKEN_OBJECT_ID)), 'read the Secure Enclave key')
   return { handle: dataBytes(handle), publicKey: publicKeyBytes(key) }
+}
+
+/** Whether this Mac has a Touch ID sensor with a finger enrolled. Asks nothing: no dialog shows. */
+export function hasTouchId(): boolean {
+  if (process.platform !== 'darwin') return false
+  const { objc, canEvaluatePolicy } = frameworks()
+  const selector = objc.sel_registerName(cstring('canEvaluatePolicy:error:'))
+  return canEvaluatePolicy(newAuthenticationContext(), selector, POLICY_BIOMETRICS, null)
 }
 
 const ENCLAVE_MODULE = import.meta.path
@@ -177,10 +186,15 @@ function enclaveAttributes(privateEntries: readonly Entry[], context?: Ref): Ref
 /** An LAContext whose reason the Touch ID dialog shows: "<app> is trying to <reason>." */
 function authenticationContext(reason: string): Ref {
   const { objc, setObject } = frameworks()
-  const allocated = objc.objc_msgSend(objc.objc_getClass(cstring('LAContext')), objc.sel_registerName(cstring('alloc')))
-  const context = check(objc.objc_msgSend(allocated, objc.sel_registerName(cstring('init'))), 'set up Touch ID')
+  const context = newAuthenticationContext()
   setObject(context, objc.sel_registerName(cstring('setLocalizedReason:')), cfString(reason))
   return context
+}
+
+function newAuthenticationContext(): Ref {
+  const { objc } = frameworks()
+  const allocated = objc.objc_msgSend(objc.objc_getClass(cstring('LAContext')), objc.sel_registerName(cstring('alloc')))
+  return check(objc.objc_msgSend(allocated, objc.sel_registerName(cstring('init'))), 'set up Touch ID')
 }
 
 function publicKeyBytes(key: Ref): Uint8Array {
@@ -291,6 +305,9 @@ function load() {
   const setObject = dlopen(LIBOBJC, {
     objc_msgSend: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.void },
   }).symbols.objc_msgSend
+  const canEvaluatePolicy = dlopen(LIBOBJC, {
+    objc_msgSend: { args: [FFIType.ptr, FFIType.ptr, FFIType.i64, FFIType.ptr], returns: FFIType.bool },
+  }).symbols.objc_msgSend
   libSystem.dlopen(cstring(LOCAL_AUTHENTICATION), RTLD_NOW)
   const securityHandle = libSystem.dlopen(cstring(SECURITY), RTLD_NOW)
   const coreHandle = libSystem.dlopen(cstring(CORE_FOUNDATION), RTLD_NOW)
@@ -305,6 +322,7 @@ function load() {
     sec,
     objc,
     setObject,
+    canEvaluatePolicy,
     constant: (name: string): Ref => valueAt(address(securityHandle, name)),
     coreConstant: (name: string): Ref => valueAt(address(coreHandle, name)),
     dictionaryCallbacks: [

@@ -76,7 +76,7 @@ it.each(['original', 'rotated', 'stripped'] as const)(
     await ok(alice, ['init', '--name', 'alice', '--machine'])
     const layout = localLayout(join(project, '.typevault'), alice)
     await appendAudit(layout, { action: 'read', mode: 'direct', entries: ['openai'] })
-    await anchorAudit(layout)
+    await anchorAudit(layout, layout.anchorsFile)
     if (history !== 'original') {
       const { identity } = await createIdentity('bob', 'machine')
       const key = encodeMemberPublic(memberPublicOfIdentity(identity))

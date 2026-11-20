@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -198,7 +198,7 @@ it('verifies the audit log against the validated owner chain, not a later owner.
   const { layout } = await setup()
   const state = localLayout(layout.vault, { XDG_CONFIG_HOME: root, TYPEVAULT_STATE_DIR: join(root, 'state') })
   await appendAudit(state, { action: 'read', mode: 'direct', entries: ['openai'] })
-  await anchorAudit(state)
+  await anchorAudit(state, state.anchorsFile)
   const anchors = state.anchorsFileFor(loadState(state, {}).origin)
 
   // when owner.json changes afterwards and the local log goes missing
@@ -257,7 +257,7 @@ it('selects the committed anchors through a current-owner pin even when the owne
   const { layout, manage } = await setup()
   const anchored = localLayout(layout.vault, { XDG_CONFIG_HOME: root, TYPEVAULT_STATE_DIR: join(root, 'state') })
   await appendAudit(anchored, { action: 'read', mode: 'direct', entries: ['openai'] })
-  await anchorAudit(anchored)
+  await anchorAudit(anchored, anchored.anchorsFile)
   await (await manage()).removeMember('bob')
 
   // when the history is replaced by one a random key signed into the current owner, keeping the owner's audit chain
@@ -280,7 +280,7 @@ it('reports anchors left under another audit chain when a fresh state directory 
   const { layout, manage } = await setup()
   const anchored = localLayout(layout.vault, { XDG_CONFIG_HOME: root, TYPEVAULT_STATE_DIR: join(root, 'state') })
   await appendAudit(anchored, { action: 'read', mode: 'direct', entries: ['openai'] })
-  await anchorAudit(anchored)
+  await anchorAudit(anchored, anchored.anchorsFile)
   await (await manage()).removeMember('bob')
 
   // when owner.json is stripped to look never rotated, and a fresh state directory pinned to the current owner loads it
@@ -296,23 +296,41 @@ it('reports anchors left under another audit chain when a fresh state directory 
   })
 })
 
-it('reports, and never anchors beside, a state-directory chain under another audit identity', async () => {
+it('reports a state-directory chain under another audit identity, and still checkpoints its own', async () => {
   // given a vault's own anchored chain, and a second chain's anchors file committed beside it
   const { layout } = await setup()
   const state = localLayout(layout.vault, { XDG_CONFIG_HOME: root, TYPEVAULT_STATE_DIR: join(root, 'state') })
   await appendAudit(state, { action: 'read', mode: 'direct', entries: ['openai'] })
-  await anchorAudit(state)
+  await anchorAudit(state, state.anchorsFile)
   const own = readFileSync(state.anchorsFile, 'utf8')
   writeFileSync(join(dirname(state.anchorsFile), 'state-other.jsonl'), own)
 
   // when it is verified, and when a writer anchors again
   const verdict = verifyAudit(state, state.anchorsFileFor(loadState(state, {}).origin))
   await appendAudit(state, { action: 'read', mode: 'direct', entries: ['openai'] })
-  await anchorAudit(state)
+  await anchorAudit(state, state.anchorsFile)
 
-  // then verification reports the other chain even though its own anchors exist, and no new checkpoint is published
+  // then verification reports the other chain even though its own anchors exist, and the validated writer checkpoints
   expect(verdict).toMatchObject({ ok: false, reason: expect.stringContaining('another audit chain') })
-  expect(readFileSync(state.anchorsFile, 'utf8')).toBe(own)
+  expect(readFileSync(state.anchorsFile, 'utf8')).not.toBe(own)
+})
+
+it('checkpoints a state-directory chain only where the validated state names it', async () => {
+  // given the destination a validated state names, then an owner.json naming another audit chain
+  const { layout } = await setup()
+  const state = localLayout(layout.vault, { XDG_CONFIG_HOME: root, TYPEVAULT_STATE_DIR: join(root, 'state') })
+  const validated = state.anchorsFileFor(loadState(state, {}).origin)
+  writeFileSync(layout.ownerFile, ownerDoc(await publicKeyOf(await generateSecretKey({ kind: 'owner' }))))
+
+  // when an offline writer with no trusted destination reaches a checkpoint, then a vault-backed writer appends
+  for (let i = 0; i < 100; i++) await appendAudit(state, { action: 'read', mode: 'sealed', entries: ['openai'] })
+  const deferred = !existsSync(validated) && !existsSync(state.anchorsFile)
+  await appendAudit(state, { action: 'read', mode: 'direct', entries: ['openai'] }, validated)
+
+  // then the checkpoint waited, and the first one lands under the validated name only
+  expect(deferred).toBe(true)
+  expect(existsSync(state.anchorsFile)).toBe(false)
+  expect(readFileSync(validated, 'utf8').trim().split('\n')).toHaveLength(1)
 })
 
 it('refuses an audit chain the current owner did not sign', async () => {

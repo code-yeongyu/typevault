@@ -93,18 +93,29 @@ function otherStateAnchors(anchorsFile: string): string | undefined {
   return readdirSync(dir).find((file) => file.startsWith('state-') && file.endsWith('.jsonl') && file !== name)
 }
 
-function writeAnchor(layout: Layout, last: AuditRecord): void {
-  // Writers name the file from owner.json as it is now. When that disagrees with the chain already committed, the
-  // record stays in the local log, but no checkpoint is published under an identity verification won't check.
-  if (otherStateAnchors(layout.anchorsFile) !== undefined) return
-  // The anchors live in the committed vault: a pulled symlink there must not redirect this append.
-  assertNoSymlinks(dirname(layout.vault), relative(dirname(layout.vault), layout.anchorsFile))
-  ensureDir(dirname(layout.anchorsFile))
-  appendLine(layout.anchorsFile, JSON.stringify({ seq: last.seq, hash: last.hash, at: last.at }))
+function writeAnchor(layout: Layout, anchorsFile: string, last: AuditRecord): void {
+  assertInVault(layout, anchorsFile)
+  ensureDir(dirname(anchorsFile))
+  appendLine(anchorsFile, JSON.stringify({ seq: last.seq, hash: last.hash, at: last.at }))
 }
 
-/** Appends one hash-chained record; every 100th record's head is anchored in the (committable) vault. */
-export function appendAudit(layout: Layout, event: AuditEvent): Promise<void> {
+// The anchors live in the committed vault: a pulled symlink there must not redirect a read or an append.
+const assertInVault = (layout: Layout, anchorsFile: string): void =>
+  assertNoSymlinks(dirname(layout.vault), relative(dirname(layout.vault), anchorsFile))
+
+function lastAnchoredSeq(layout: Layout, anchorsFile: string): number {
+  assertInVault(layout, anchorsFile)
+  if (!existsSync(anchorsFile)) return 0
+  const last = readFileSync(anchorsFile, 'utf8').trimEnd().split('\n').at(-1)
+  return last === undefined || last === '' ? 0 : parseJsonText(anchorsFile, last, AnchorSchema).seq
+}
+
+/**
+ * Appends one hash-chained record; every 100th record's head is anchored in the (committable) vault. `anchorsFile` is
+ * the one a validated vault state names. Without it, a state-directory chain has no trusted destination: the record
+ * stays in the local log and its checkpoint waits for the next write that has one.
+ */
+export function appendAudit(layout: Layout, event: AuditEvent, anchorsFile = layout.fixedAnchorsFile): Promise<void> {
   return withLock(layout.auditLock, 'exclusive', async () => {
     ensureDir(layout.audit, 0o700)
     const last = readLast(layout)
@@ -112,15 +123,18 @@ export function appendAudit(layout: Layout, event: AuditEvent): Promise<void> {
     const unhashed = { ...fields, seq: (last?.seq ?? 0) + 1, at: new Date().toISOString(), prev: last?.hash ?? GENESIS }
     const record = { ...unhashed, hash: hashOf(unhashed) }
     appendLine(layout.auditLog, JSON.stringify(record))
-    if (record.seq % ANCHOR_EVERY === 0) writeAnchor(layout, record)
+    if (anchorsFile === undefined) return
+    const due = record.seq % ANCHOR_EVERY === 0 || record.seq - lastAnchoredSeq(layout, anchorsFile) >= ANCHOR_EVERY
+    if (due) writeAnchor(layout, anchorsFile, record)
   })
 }
 
-/** Anchors the current head now, e.g. when the daemon stops. */
-export function anchorAudit(layout: Layout): Promise<void> {
+/** Anchors the current head now, in the anchors file a validated vault state names. */
+export function anchorAudit(layout: Layout, anchorsFile = layout.fixedAnchorsFile): Promise<void> {
   return withLock(layout.auditLock, 'exclusive', async () => {
     const last = readAudit(layout).at(-1)
-    if (last !== undefined) writeAnchor(layout, last)
+    if (anchorsFile === undefined || last === undefined) return
+    writeAnchor(layout, anchorsFile, last)
   })
 }
 

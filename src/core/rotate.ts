@@ -3,7 +3,7 @@ import { canonicalJson, utf8 } from './encoding'
 import { sealEntry, type SignerRef, signerOf } from './entries'
 import { TypeVaultError } from './errors'
 import { ownerWrapPath, wrapPath } from './keyring'
-import { handover, ownerDoc, readOwner } from './owner-trust'
+import { auditChainOf, handover, ownerDoc, readOwner, signAuditChain } from './owner-trust'
 import { type Tier, tiersDoc, includersOf, reach, type VaultState, membersDoc, signersDoc, ceilingsDoc } from './state'
 import type { Txn } from './txn'
 import type { Vault } from './vault'
@@ -24,8 +24,12 @@ export async function rotateOwner(context: RotateContext): Promise<readonly stri
   // this rotation validated, and is staged only while owner.json still is exactly that document.
   const previous = { recipient: state.owner.recipient, signPublic: state.owner.signPublic, handovers: state.handovers }
   const unchanged = () => {
-    const { recipient, signPublic, handovers } = readOwner(vault.layout)
-    if (canonicalJson({ recipient, signPublic, handovers }) !== canonicalJson(previous))
+    const current = readOwner(vault.layout)
+    const { recipient, signPublic, handovers } = current
+    if (
+      canonicalJson({ recipient, signPublic, handovers }) !== canonicalJson(previous) ||
+      auditChainOf(current) !== state.origin
+    )
       throw new TypeVaultError('conflict', 'owner.json changed while rotating the owner key; pull and retry')
   }
   unchanged()
@@ -40,7 +44,9 @@ export async function rotateOwner(context: RotateContext): Promise<readonly stri
   txn.put('ceilings.json', ceilingsDoc(state.ceilings, owner, state.seqs.ceilings + 1))
   const affected = await rotateTiers({ ...context, owner, state: { ...state, owner: pub } }, Object.keys(state.tiers))
   unchanged()
-  txn.put('owner.json', ownerDoc(pub, handover(previous, context.owner, pub)))
+  // The new owner endorses the same audit chain, so the vault's committed audit anchors keep their name.
+  const audit = signAuditChain(state.origin, owner, pub.signPublic)
+  txn.put('owner.json', ownerDoc(pub, handover(previous, context.owner, pub), audit))
   return affected
 }
 

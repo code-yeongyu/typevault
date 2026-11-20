@@ -13,12 +13,29 @@ import { holdLock } from './lock'
 
 export const PublicKeySchema = z.object({ recipient: z.string().startsWith('age1'), signPublic: z.string() })
 const Link = z.object({ from: z.string(), to: PublicKeySchema, sig: z.string() })
-const Owner = PublicKeySchema.extend({ handovers: z.array(Link).default([]) })
+const AuditChain = z.object({ chain: z.string(), sig: z.string() })
+const Owner = PublicKeySchema.extend({ handovers: z.array(Link).default([]), audit: AuditChain.optional() })
 type Link = z.infer<typeof Link>
+type AuditChain = z.infer<typeof AuditChain>
 export type Owner = z.infer<typeof Owner>
 const Trust = z.object({ ownerSignPublic: z.string() })
 
 const linkBytes = (from: string, to: PublicKey) => utf8(canonicalJson({ purpose: 'typevault:handover', from, to }))
+const auditBytes = (chain: string, signPublic: string) =>
+  utf8(canonicalJson({ purpose: 'typevault:audit-chain', chain, signPublic }))
+
+/**
+ * The vault's audit identity: its first owner key, which names the state-directory audit chain. Each owner signs it
+ * again, so a machine that trusts the current owner trusts it without trusting the history in between. Until the first
+ * rotation it is the current owner key itself.
+ */
+export const auditChainOf = (owner: Owner): string => owner.audit?.chain ?? owner.signPublic
+
+/** The audit identity `chain`, endorsed by the owner `key` that holds `signPublic`. */
+export const signAuditChain = (chain: string, key: SecretKey, signPublic: string): AuditChain => ({
+  chain,
+  sig: sign(key.signSecret, auditBytes(chain, signPublic)),
+})
 
 export function handover(from: Owner, signing: SecretKey, to: PublicKey): readonly Link[] {
   return [
@@ -27,15 +44,13 @@ export function handover(from: Owner, signing: SecretKey, to: PublicKey): readon
   ]
 }
 
-export function ownerDoc(key: PublicKey, handovers: readonly Link[] = []): string {
-  return `${JSON.stringify({ v: 1, ...key, handovers }, null, 2)}\n`
+export function ownerDoc(key: PublicKey, handovers: readonly Link[] = [], audit?: AuditChain): string {
+  return `${JSON.stringify({ v: 1, ...key, handovers, ...(audit === undefined ? {} : { audit }) }, null, 2)}\n`
 }
 
 export function readOwner(layout: Layout): Owner {
   return readOwnerFile(layout.ownerFile)
 }
-
-export const firstOwnerSignPublic = (owner: Owner): string => owner.handovers[0]?.from ?? owner.signPublic
 
 export function readOwnerFile(path: string): Owner {
   if (!existsSync(path)) throw new TypeVaultError('not_found', `no vault at ${dirname(path)} (run typevault init)`)
@@ -52,6 +67,12 @@ export function readOwnerFile(path: string): Owner {
   const last = owner.handovers.at(-1)
   if (last !== undefined && last.to.recipient !== owner.recipient)
     throw new TypeVaultError('tampered', 'invalid handover recipient')
+  if (owner.audit === undefined) {
+    if (owner.handovers.length > 0)
+      throw new TypeVaultError('tampered', 'a rotated owner.json must sign its audit chain')
+  } else if (!verifySignature(owner.signPublic, auditBytes(owner.audit.chain, owner.signPublic), owner.audit.sig)) {
+    throw new TypeVaultError('tampered', 'invalid vault audit chain signature')
+  }
   return owner
 }
 

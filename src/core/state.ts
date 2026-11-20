@@ -7,13 +7,7 @@ import { canonicalJson, type Json, utf8 } from './encoding'
 import { TypeVaultError } from './errors'
 import { readJsonFile } from './json-file'
 import type { Layout } from './layout'
-import {
-  firstOwnerSignPublic,
-  type Owner,
-  PublicKeySchema,
-  readOwner as verifiedOwner,
-  trustOwner,
-} from './owner-trust'
+import { auditChainOf, type Owner, PublicKeySchema, readOwner as verifiedOwner, trustOwner } from './owner-trust'
 import { RevisionMarks } from './revisions'
 
 export type Tier = {
@@ -48,7 +42,7 @@ export type ManifestSeqs = {
 
 export type VaultState = {
   readonly owner: PublicKey
-  /** The first owner key of the verified handover chain, as pinned on this machine. */
+  /** The vault's first owner key, its audit identity: signed by the current owner and pinned on this machine. */
   readonly origin: string
   /** The verified handover chain that led to `owner`. */
   readonly handovers: Owner['handovers']
@@ -131,15 +125,15 @@ export function loadState(layout: Layout, env: Readonly<Record<string, string | 
   if (!marks.accept('owner:handovers', owner.handovers.length)) {
     throw new TypeVaultError('tampered', 'owner.json has fewer handovers than this machine has seen')
   }
-  // Anyone can sign a link from a key of their own, so the chain alone doesn't prove where it starts. The first origin
-  // this machine trusted is pinned here; the audit chain is named after it.
-  const claimed = firstOwnerSignPublic(owner)
-  const origin = `owner:origin:${claimed}`
-  if (!marks.allows('owner:origin', 0) && marks.allows(origin, 0)) {
-    throw new TypeVaultError('tampered', 'owner.json claims a different first owner than this machine trusted')
+  // The current owner signs the audit chain, so trusting that owner authenticates it. A machine also pins the first
+  // chain it trusted, so no later owner.json can move its audit anchors elsewhere.
+  const auditChain = auditChainOf(owner)
+  const pinned = `owner:audit:${auditChain}`
+  if (!marks.allows('owner:audit', 0) && marks.allows(pinned, 0)) {
+    throw new TypeVaultError('tampered', 'owner.json names a different audit chain than this machine trusted')
   }
-  marks.accept('owner:origin', 1)
-  marks.accept(origin, 1)
+  marks.accept('owner:audit', 1)
+  marks.accept(pinned, 1)
   for (const [name, doc] of [
     ['tiers', tiers],
     ['members', members],
@@ -157,7 +151,7 @@ export function loadState(layout: Layout, env: Readonly<Record<string, string | 
   marks.save()
   return {
     owner,
-    origin: claimed,
+    origin: auditChain,
     handovers: owner.handovers,
     seqs: { tiers: tiers.seq, members: members.seq, signers: signers.seq, ceilings: ceilings.seq },
     tiers: tiers.tiers,

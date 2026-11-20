@@ -1,3 +1,5 @@
+import { existsSync, readdirSync } from 'node:fs'
+
 import { encodeSecretKey, generateSecretKey, publicKeyOf, seal, type SecretKey } from './crypto'
 import { canonicalJson, utf8 } from './encoding'
 import { sealEntry, type SignerRef, signerOf } from './entries'
@@ -6,7 +8,7 @@ import { ownerWrapPath, wrapPath } from './keyring'
 import { auditChainOf, handover, ownerDoc, readOwner, signAuditChain } from './owner-trust'
 import { type Tier, tiersDoc, includersOf, reach, type VaultState, membersDoc, signersDoc, ceilingsDoc } from './state'
 import type { Txn } from './txn'
-import type { Vault } from './vault'
+import type { ScanProblem, StoredEntry, Vault } from './vault'
 
 export type RotateContext = {
   readonly vault: Vault
@@ -48,6 +50,19 @@ export async function rotateOwner(context: RotateContext): Promise<readonly stri
   const audit = signAuditChain(state.origin, owner, pub.signPublic)
   txn.put('owner.json', ownerDoc(pub, handover(previous, context.owner, pub), audit))
   return affected
+}
+
+const unaccountedEntryFiles = (
+  vault: Vault,
+  entries: readonly StoredEntry[],
+  problems: readonly ScanProblem[],
+): readonly string[] => {
+  const accounted = new Set([
+    ...entries.map(({ envelope }) => `${envelope.id}.json`),
+    ...problems.map(({ file }) => file),
+  ])
+  const files = existsSync(vault.layout.entries) ? readdirSync(vault.layout.entries) : []
+  return files.filter((file) => file.endsWith('.json') && !accounted.has(file))
 }
 
 const signedBy = (signer: SignerRef, tier: string): boolean =>
@@ -106,8 +121,13 @@ export async function rotateTiers(context: RotateContext, names: readonly string
   const affected: string[] = []
   const now = new Date().toISOString()
   const { entries, problems } = await vault.scan()
-  if (ownerChanged && problems.length > 0) {
-    const files = problems.map(({ file, reason }) => `${file} (${reason})`).join(', ')
+  // A scan leaves out entries no held key opens. An owner rotation must re-seal every one of them, or the ones it misses
+  // stay sealed to the old keys alone, so each entry file has to be read or reported.
+  const unopened = ownerChanged ? unaccountedEntryFiles(vault, entries, problems) : []
+  if (ownerChanged && problems.length + unopened.length > 0) {
+    const files = [...problems, ...unopened.map((file) => ({ file, reason: 'its tier key cannot be opened' }))]
+      .map(({ file, reason }) => `${file} (${reason})`)
+      .join(', ')
     throw new TypeVaultError(
       'tampered',
       `cannot rotate the owner while entries are unreadable: ${files}. Run typevault doctor; move a file you can't vouch for out of entries/ (or restore it from git), then retry`,

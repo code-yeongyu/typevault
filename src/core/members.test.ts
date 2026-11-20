@@ -123,6 +123,24 @@ it('refuses to remove an owner', async () => {
   })
 })
 
+it('refuses to rotate the owner past an entry no held key can open', async () => {
+  // given a second owner, and an entry whose tier the owner key no longer opens
+  const bob = await createIdentity('bob', 'machine')
+  await admin.addMember('bob', { ...founderOf(bob.identity).member, owner: true, tiers: [] })
+  const entry = await put('openai', 'member')
+  const before = (await open([])).state
+  rmSync(join(globalLayout(envIn(root)).vault, wrapPath('member', before.tiers['member']?.gen ?? 0, { kind: 'owner' })))
+
+  // when Bob is removed, which rotates the owner key
+  const removing = admin.removeMember('bob')
+
+  // then the rotation names the entry it can't re-seal and changes nothing
+  await expect(removing).rejects.toMatchObject({ code: 'tampered', message: expect.stringContaining(entry.id) })
+  const after = (await open([])).state
+  expect(after.owner).toEqual(before.owner)
+  expect(after.members['bob']).toBeDefined()
+})
+
 it('revokes a co-owner even if they saved the shared owner key and a tier key', async () => {
   // given two owners and secrets in independent tiers
   const bob = await createIdentity('bob', 'machine')

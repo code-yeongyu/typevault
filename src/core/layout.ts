@@ -29,6 +29,8 @@ export type Layout = {
   readonly anchorsFile: string
   /** The anchors file for an audit chain already validated, so it isn't read again from owner.json. */
   readonly anchorsFileFor: (auditChain: string) => string
+  /** The anchors file when its name doesn't come from owner.json; with a state directory only a validated state names it. */
+  readonly fixedAnchorsFile: string | undefined
   /** Anchors from before chains had their own file; still checked against this checkout's log. */
   readonly legacyAnchorsFile: string
   readonly txnDir: string
@@ -155,7 +157,7 @@ function vaultLayout(scope: Layout['scope'], dir: string, env: Env): Layout {
     stateDir === undefined
       ? () => shortHash(`${hostId(env)}\0${root}`)
       : (auditChain = auditChainOf(readOwnerFile(join(dir, 'owner.json')))) => `state-${vaultIdOf(auditChain)}`
-  return build(scope, root, dir, setting(env, 'TYPEVAULT_RUN_DIR'), chain)
+  return build(scope, root, dir, setting(env, 'TYPEVAULT_RUN_DIR'), chain, stateDir !== undefined)
 }
 
 // A home directory reached through a symlink (macOS's /tmp, say) is still the same directory.
@@ -185,6 +187,7 @@ function build(
   vault: string,
   runDir: string | undefined,
   chain: (auditChain?: string) => string,
+  ownerNamed: boolean,
 ): Layout {
   const audit = join(root, 'audit')
   const run = join(root, 'run')
@@ -207,6 +210,7 @@ function build(
       return join(vault, 'audit-anchors', `${chain()}.jsonl`)
     },
     anchorsFileFor: (auditChain) => join(vault, 'audit-anchors', `${chain(auditChain)}.jsonl`),
+    fixedAnchorsFile: ownerNamed ? undefined : join(vault, 'audit-anchors', `${chain()}.jsonl`),
     legacyAnchorsFile: join(vault, 'audit-anchors.jsonl'),
     // Staging lives in run/, which is never committed: a txn dir from git must not be able to steer deletes.
     txnDir: join(run, 'txn'),

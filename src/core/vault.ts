@@ -139,6 +139,11 @@ export class Vault {
     return this.#state
   }
 
+  /** The audit anchors file this vault's validated state names: the only one its audit writes checkpoint to. */
+  get anchorsFile(): string {
+    return this.layout.anchorsFileFor(this.#state.origin)
+  }
+
   get keyring(): Keyring {
     return this.#keyring
   }

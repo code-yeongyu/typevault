@@ -157,6 +157,8 @@ they lock it; a machine member's daemon starts on its own.
   `.typevault/`, and gitignore them (plus `git rm -r --cached .typevault/audit-anchors`) only if the user asks:
   ignored anchors can't catch a rewritten audit log.
 - **Signature or merge problems after a git pull**: `typevault doctor --fix` (owner).
+- **`the vault owner rotated`**: an owner was removed and the owner key changed. Ask the user to pull the vault, then
+  run `typevault lock` and `typevault unlock`, and to issue you a fresh grant. Old grants can't write after a rotation.
 - **Daemon trouble with a live grant**: check `typevault daemon status`, then ask the owner. Don't stop the daemon
   yourself: restarting it needs keys a grant doesn't carry.
 - **`the running typevault daemon is version ...`**: it is from another typevault release. Ask the user to run the

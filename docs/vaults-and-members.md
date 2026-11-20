@@ -36,7 +36,8 @@ stays keyed by path, so a vault whose `owner.json` is swapped through git is sti
 `TYPEVAULT_STATE_DIR` (SDK: `stateDir`) puts a vault's private state (trust pin, audit log, `run/`) in that directory
 instead of `checkouts/<id>/`. Every opener given the same state directory acts as one checkout, whatever path or home it
 reaches the vault through, so a folder carrying both the vault and its state can move or be mounted elsewhere and keep
-its trust pin, rollback protection and audit chain. Its audit anchors are named by the vault's owner key, not by host or path, so a
+its trust pin, rollback protection and audit chain. Its audit anchors are named by the vault's first owner key, not by host or
+path, and keep that name across owner rotations, so a
 deleted audit log still fails against them. Give each vault its own state directory, and keep it out of git's reach as you would
 `~/.config`.
 

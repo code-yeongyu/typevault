@@ -104,16 +104,16 @@ const assertInVault = (layout: Layout, anchorsFile: string): void =>
   assertNoSymlinks(dirname(layout.vault), relative(dirname(layout.vault), anchorsFile))
 
 /**
- * The last checkpoint's seq, for catching up deferred ones. A damaged tail gives undefined rather than throwing: this
- * runs after the operation being audited took effect, and verification reports the damage.
+ * The last checkpoint's seq, for catching up deferred ones. An anchors file it can't read or parse gives undefined
+ * rather than throwing: this runs after the operation being audited took effect, checkpoint writes keep their own
+ * checks, and verification reports the damage.
  */
 function lastAnchoredSeq(layout: Layout, anchorsFile: string): number | undefined {
-  assertInVault(layout, anchorsFile)
-  if (!existsSync(anchorsFile)) return 0
-  const last = readFileSync(anchorsFile, 'utf8').trimEnd().split('\n').at(-1)
-  if (last === undefined || last === '') return 0
   try {
-    return AnchorSchema.parse(JSON.parse(last)).seq
+    assertInVault(layout, anchorsFile)
+    if (!existsSync(anchorsFile)) return 0
+    const last = readFileSync(anchorsFile, 'utf8').trimEnd().split('\n').at(-1)
+    return last === undefined || last === '' ? 0 : AnchorSchema.parse(JSON.parse(last)).seq
   } catch {
     return undefined
   }

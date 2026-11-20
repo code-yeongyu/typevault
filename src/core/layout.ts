@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path'
 
 import { sha256Hex } from './crypto'
 import { utf8 } from './encoding'
-import { firstOwnerSignPublic, readOwnerFile } from './owner-trust'
+import { auditChainOf, readOwnerFile } from './owner-trust'
 
 export type Layout = {
   /** `global`: one vault per user, `~/.typevault/`. `local`: a `.typevault/` committed in a project. */
@@ -27,8 +27,8 @@ export type Layout = {
   readonly ceilingsFile: string
   /** This checkout's audit anchors: one committed file per audit chain, so clones never check each other's. */
   readonly anchorsFile: string
-  /** The anchors file for a first owner key already validated, so it isn't read again from owner.json. */
-  readonly anchorsFileFor: (origin: string) => string
+  /** The anchors file for an audit chain already validated, so it isn't read again from owner.json. */
+  readonly anchorsFileFor: (auditChain: string) => string
   /** Anchors from before chains had their own file; still checked against this checkout's log. */
   readonly legacyAnchorsFile: string
   readonly txnDir: string
@@ -149,12 +149,12 @@ function vaultLayout(scope: Layout['scope'], dir: string, env: Env): Layout {
   const stateDir = setting(env, 'TYPEVAULT_STATE_DIR')
   const root = stateDir ?? join(configDir(env), 'checkouts', shortHash(resolve(dir)))
   // Without a state directory, a chain is named by where its log lives. With one, it is the vault's single chain,
-  // named by its first owner key: nothing kept in the state directory can be lost or swapped to escape its anchors,
-  // and the name survives owner rotations.
+  // named by the vault's signed audit chain: nothing kept in the state directory can be lost or swapped to escape its
+  // anchors, and the name survives owner rotations.
   const chain =
     stateDir === undefined
       ? () => shortHash(`${hostId(env)}\0${root}`)
-      : (origin = firstOwnerSignPublic(readOwnerFile(join(dir, 'owner.json')))) => `state-${vaultIdOf(origin)}`
+      : (auditChain = auditChainOf(readOwnerFile(join(dir, 'owner.json')))) => `state-${vaultIdOf(auditChain)}`
   return build(scope, root, dir, setting(env, 'TYPEVAULT_RUN_DIR'), chain)
 }
 
@@ -184,7 +184,7 @@ function build(
   root: string,
   vault: string,
   runDir: string | undefined,
-  chain: (origin?: string) => string,
+  chain: (auditChain?: string) => string,
 ): Layout {
   const audit = join(root, 'audit')
   const run = join(root, 'run')
@@ -206,7 +206,7 @@ function build(
     get anchorsFile() {
       return join(vault, 'audit-anchors', `${chain()}.jsonl`)
     },
-    anchorsFileFor: (origin) => join(vault, 'audit-anchors', `${chain(origin)}.jsonl`),
+    anchorsFileFor: (auditChain) => join(vault, 'audit-anchors', `${chain(auditChain)}.jsonl`),
     legacyAnchorsFile: join(vault, 'audit-anchors.jsonl'),
     // Staging lives in run/, which is never committed: a txn dir from git must not be able to steer deletes.
     txnDir: join(run, 'txn'),

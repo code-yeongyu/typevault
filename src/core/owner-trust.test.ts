@@ -11,7 +11,7 @@ import { createIdentity } from './identity'
 import { founderOf, initLocalVault } from './init'
 import { localLayout } from './layout'
 import { withLock } from './lock'
-import { handover, ownerDoc, readOwner } from './owner-trust'
+import { handover, ownerDoc, readOwner, signAuditChain } from './owner-trust'
 import { rotateOwner } from './rotate'
 import { loadState } from './state'
 import { Txn } from './txn'
@@ -237,9 +237,10 @@ it('refuses to rotate when only the owner history changed underneath it', async 
   const { recipient, signPublic } = readOwner(layout)
   const forger = await generateSecretKey({ kind: 'owner' })
   const from = { ...(await publicKeyOf(forger)), handovers: [] }
+  const audit = signAuditChain(signPublic, owner, signPublic)
   writeFileSync(
     layout.ownerFile,
-    ownerDoc({ recipient, signPublic }, handover(from, forger, { recipient, signPublic })),
+    ownerDoc({ recipient, signPublic }, handover(from, forger, { recipient, signPublic }), audit),
   )
 
   // when the rotation prepares its writes
@@ -249,6 +250,48 @@ it('refuses to rotate when only the owner history changed underneath it', async 
   // then it stops before carrying that history into the new owner.json
   await expect(rotating).rejects.toMatchObject({ code: 'conflict' })
   expect(txn.puts.has('owner.json')).toBe(false)
+})
+
+it('selects the committed anchors through a current-owner pin even when the owner history is forged', async () => {
+  // given an anchor committed under the vault's audit chain, then a rotation
+  const { layout, manage } = await setup()
+  const anchored = localLayout(layout.vault, { XDG_CONFIG_HOME: root, TYPEVAULT_STATE_DIR: join(root, 'state') })
+  await appendAudit(anchored, { action: 'read', mode: 'direct', entries: ['openai'] })
+  await anchorAudit(anchored)
+  await (await manage()).removeMember('bob')
+
+  // when the history is replaced by one a random key signed into the current owner, keeping the owner's audit chain
+  const genuine = readOwner(layout)
+  const { recipient, signPublic } = genuine
+  const forger = await generateSecretKey({ kind: 'owner' })
+  const from = { ...(await publicKeyOf(forger)), handovers: [] }
+  const forged = handover(from, forger, { recipient, signPublic })
+  writeFileSync(layout.ownerFile, ownerDoc({ recipient, signPublic }, forged, genuine.audit))
+  const fresh = localLayout(layout.vault, { XDG_CONFIG_HOME: root, TYPEVAULT_STATE_DIR: join(root, 'fresh') })
+  const { origin } = loadState(fresh, { TYPEVAULT_OWNER: signPublic })
+
+  // then the chain the current owner signed still names the committed anchors, so the missing log is reported
+  expect(fresh.anchorsFileFor(origin)).toBe(anchored.anchorsFile)
+  expect(verifyAudit(fresh, fresh.anchorsFileFor(origin))).toMatchObject({ ok: false })
+})
+
+it('refuses an audit chain the current owner did not sign', async () => {
+  // given a rotated vault
+  const { layout, manage } = await setup()
+  await (await manage()).removeMember('bob')
+  const { recipient, signPublic, handovers } = readOwner(layout)
+
+  // when its audit chain is replaced by one another key signed, or dropped
+  const forger = await generateSecretKey({ kind: 'owner' })
+  const forgerPublic = (await publicKeyOf(forger)).signPublic
+  const replaced = ownerDoc({ recipient, signPublic }, handovers, signAuditChain(forgerPublic, forger, signPublic))
+  const dropped = ownerDoc({ recipient, signPublic }, handovers)
+
+  // then both are tampered
+  for (const doc of [replaced, dropped]) {
+    writeFileSync(layout.ownerFile, doc)
+    expect(() => readOwner(layout)).toThrow(expect.objectContaining({ code: 'tampered' }))
+  }
 })
 
 it('rejects a handover signed by an unrelated key without changing trust', async () => {

@@ -42,20 +42,26 @@ it.each([
   ['before any rotation', false],
 ])('refuses a handover chain claiming another first owner %s', async (_, rotate) => {
   // given a machine that trusts the current owner
-  const { layout, remote, manage } = await setup()
+  const { layout, env, key, remote, manage } = await setup()
   if (rotate) await (await manage()).removeMember('bob')
   loadState(remote, {})
 
-  // when the chain is replaced by a valid one that a random key signed into the current owner
+  // when the chain is replaced by a valid one that a random key signed into the current owner, and the current owner
+  // endorses that random key as the audit chain
+  const owner = (await Vault.open(layout, [key], env)).keyring.owner
+  if (owner === undefined) throw new Error('expected the owner key')
   const { recipient, signPublic } = readOwner(layout)
   const to = { recipient, signPublic }
   const random = await generateSecretKey({ kind: 'owner' })
   const from = (await publicKeyOf(random)).signPublic
   const sig = sign(random.signSecret, utf8(canonicalJson({ purpose: 'typevault:handover', from, to })))
-  writeFileSync(layout.ownerFile, ownerDoc(to, [{ from, to, sig }]))
+  writeFileSync(layout.ownerFile, ownerDoc(to, [{ from, to, sig }], signAuditChain(from, owner, signPublic)))
 
-  // then the machine refuses the new origin, which would name a different audit chain
-  expect(() => loadState(remote, {})).toThrow(expect.objectContaining({ code: 'tampered' }))
+  // then the document itself is valid, but the machine refuses its audit chain for differing from the pinned one
+  expect(readOwner(layout).audit?.chain).toBe(from)
+  expect(() => loadState(remote, {})).toThrow(
+    expect.objectContaining({ code: 'tampered', message: expect.stringContaining('different audit chain') }),
+  )
 })
 
 it('opens the vault only after a rotation in progress has published', async () => {

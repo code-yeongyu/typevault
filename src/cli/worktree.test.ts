@@ -1,13 +1,24 @@
 import { expect, it } from 'bun:test'
+
+const fail = (message: string): never => {
+  throw new Error(message)
+}
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { z } from 'zod'
 
 import { generateSecretKey, publicKeyOf } from '../core/crypto'
-import { createIdentity, encodeMemberPublic, memberPublicOfIdentity } from '../core/identity'
+import {
+  createIdentity,
+  encodeMemberPublic,
+  memberPublicOfIdentity,
+  readIdentity,
+  unlockIdentity,
+} from '../core/identity'
 import { localLayout } from '../core/layout'
-import { handover, ownerDoc, readOwner } from '../core/owner-trust'
+import { handover, ownerDoc, readOwner, signAuditChain } from '../core/owner-trust'
+import { Vault } from '../core/vault'
 import { callDaemon, servingPid } from '../daemon/client'
 import { addWorktree, base, cli, git, LOCKED, main, owner, PASSWORD, succeeds } from './worktree.harness'
 
@@ -90,12 +101,17 @@ it('locks a worktree on an older owner generation even when its history claims a
   succeeds(await cli(['member', 'rm', 'bob', '--vault-password-stdin'], main, `${PASSWORD}\n`))
   const layout = localLayout(join(worktree, '.typevault'), owner)
   const { recipient, signPublic } = readOwner(layout)
+  const member = await unlockIdentity(readIdentity(owner) ?? fail('expected an identity'), PASSWORD)
+  const ownerKey = (await Vault.open(layout, [member], owner)).keyring.owner ?? fail('expected the owner key')
   const forger = await generateSecretKey({ kind: 'owner' })
   const from = { ...(await publicKeyOf(forger)), handovers: [] }
+  // The worktree's own owner endorses its audit chain, so the forged history still reads as valid.
+  const audit = signAuditChain(signPublic, ownerKey, signPublic)
   writeFileSync(
     layout.ownerFile,
-    ownerDoc({ recipient, signPublic }, handover(from, forger, { recipient, signPublic })),
+    ownerDoc({ recipient, signPublic }, handover(from, forger, { recipient, signPublic }), audit),
   )
+  expect(readOwner(layout).handovers).toHaveLength(1)
   expect(existsSync(layout.grantsFile)).toBe(true)
 
   // when the rotated checkout locks the vault

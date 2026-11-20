@@ -103,11 +103,20 @@ function writeAnchor(layout: Layout, anchorsFile: string, last: AuditRecord): vo
 const assertInVault = (layout: Layout, anchorsFile: string): void =>
   assertNoSymlinks(dirname(layout.vault), relative(dirname(layout.vault), anchorsFile))
 
-function lastAnchoredSeq(layout: Layout, anchorsFile: string): number {
+/**
+ * The last checkpoint's seq, for catching up deferred ones. A damaged tail gives undefined rather than throwing: this
+ * runs after the operation being audited took effect, and verification reports the damage.
+ */
+function lastAnchoredSeq(layout: Layout, anchorsFile: string): number | undefined {
   assertInVault(layout, anchorsFile)
   if (!existsSync(anchorsFile)) return 0
   const last = readFileSync(anchorsFile, 'utf8').trimEnd().split('\n').at(-1)
-  return last === undefined || last === '' ? 0 : parseJsonText(anchorsFile, last, AnchorSchema).seq
+  if (last === undefined || last === '') return 0
+  try {
+    return AnchorSchema.parse(JSON.parse(last)).seq
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -124,7 +133,8 @@ export function appendAudit(layout: Layout, event: AuditEvent, anchorsFile = lay
     const record = { ...unhashed, hash: hashOf(unhashed) }
     appendLine(layout.auditLog, JSON.stringify(record))
     if (anchorsFile === undefined) return
-    const due = record.seq % ANCHOR_EVERY === 0 || record.seq - lastAnchoredSeq(layout, anchorsFile) >= ANCHOR_EVERY
+    const anchored = record.seq % ANCHOR_EVERY === 0 ? undefined : lastAnchoredSeq(layout, anchorsFile)
+    const due = record.seq % ANCHOR_EVERY === 0 || (anchored !== undefined && record.seq - anchored >= ANCHOR_EVERY)
     if (due) writeAnchor(layout, anchorsFile, record)
   })
 }

@@ -1,5 +1,15 @@
-import { appendFileSync, closeSync, existsSync, fsyncSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
-import { dirname, relative } from 'node:path'
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  fsyncSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  statSync,
+} from 'node:fs'
+import { basename, dirname, relative } from 'node:path'
 
 import { z } from 'zod'
 
@@ -121,6 +131,15 @@ export function verifyAudit(layout: Layout, anchorsFile = layout.anchorsFile): A
 }
 
 function verifyChain(layout: Layout, anchorsFile: string): AuditVerdict {
+  // A vault's state-directory chain never changes name, so anchors under another name while this one has none mean the
+  // owner history this machine accepted (on first use) isn't the vault's: report it rather than an empty, healthy chain.
+  // Only verification checks this, so a stray anchors file can't keep the vault from opening.
+  const name = basename(anchorsFile)
+  const dir = dirname(anchorsFile)
+  if (name.startsWith('state-') && !existsSync(anchorsFile) && existsSync(dir)) {
+    const other = readdirSync(dir).find((file) => file.startsWith('state-') && file.endsWith('.jsonl'))
+    if (other !== undefined) return { ok: false, reason: `anchors exist only for another audit chain (${other})` }
+  }
   const records = readAudit(layout)
   let prev = GENESIS
   const heads = new Map<number, string>()

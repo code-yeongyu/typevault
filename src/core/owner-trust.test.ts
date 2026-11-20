@@ -275,6 +275,27 @@ it('selects the committed anchors through a current-owner pin even when the owne
   expect(verifyAudit(fresh, fresh.anchorsFileFor(origin))).toMatchObject({ ok: false })
 })
 
+it('reports anchors left under another audit chain when a fresh state directory accepts a stripped owner', async () => {
+  // given an anchor committed under the vault's audit chain, then a rotation
+  const { layout, manage } = await setup()
+  const anchored = localLayout(layout.vault, { XDG_CONFIG_HOME: root, TYPEVAULT_STATE_DIR: join(root, 'state') })
+  await appendAudit(anchored, { action: 'read', mode: 'direct', entries: ['openai'] })
+  await anchorAudit(anchored)
+  await (await manage()).removeMember('bob')
+
+  // when owner.json is stripped to look never rotated, and a fresh state directory pinned to the current owner loads it
+  const { recipient, signPublic } = readOwner(layout)
+  writeFileSync(layout.ownerFile, ownerDoc({ recipient, signPublic }))
+  const fresh = localLayout(layout.vault, { XDG_CONFIG_HOME: root, TYPEVAULT_STATE_DIR: join(root, 'fresh') })
+  const { origin } = loadState(fresh, { TYPEVAULT_OWNER: signPublic })
+
+  // then verification reports the committed anchors it can't account for instead of an empty, healthy chain
+  expect(verifyAudit(fresh, fresh.anchorsFileFor(origin))).toMatchObject({
+    ok: false,
+    reason: expect.stringContaining('another audit chain'),
+  })
+})
+
 it('refuses an audit chain the current owner did not sign', async () => {
   // given a rotated vault
   const { layout, manage } = await setup()

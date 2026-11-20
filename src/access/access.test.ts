@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { readAudit } from '../audit/log'
+import { appendAudit, readAudit } from '../audit/log'
 import { Admin } from '../core/admin'
 import { adoptCertWrites } from '../core/adopt'
 import type { SecretKey } from '../core/crypto'
@@ -524,6 +524,20 @@ describe('sealed grants', () => {
     const stored = await (await Vault.open(globalLayout(envIn(root)), [owner], {})).find(n('github/bot'))
     expect(stored?.payload.fields).toEqual({ password: { type: 'secret' as const, value: 'rotated' } })
     expect(stored?.envelope.signer.kind).toBe('cert')
+  })
+
+  it('checkpoints a write in the state-directory chain of the vault it opened', async () => {
+    // given a state directory whose log holds a full interval of reads with no trusted checkpoint destination
+    const layout = globalLayout({ ...envIn(root), TYPEVAULT_STATE_DIR: join(root, 'state') })
+    for (let i = 0; i < 100; i++) await appendAudit(layout, { action: 'read', mode: 'sealed', entries: ['github/bot'] })
+    const access = new SealedAccess(await readSealedGrant(await issue()), layout, {})
+
+    // when the grant writes, which opens the vault
+    await access.set({ name: n('github/bot'), fields: { password: { type: 'secret' as const, value: 'rotated' } } })
+
+    // then the deferred checkpoint lands in the chain that vault's validated state names
+    const { origin } = (await Vault.open(layout, [], {})).state
+    expect(existsSync(layout.anchorsFileFor(origin))).toBe(true)
   })
 
   describe('on an imported entry', () => {

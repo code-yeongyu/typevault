@@ -66,13 +66,17 @@ export function adminRoutes(context: DaemonContext, ceiling: Ceiling): Readonly<
         label: body.label,
         ceiling: ceiling.name,
       })
-      await appendAudit(context.vault.layout, {
-        action: 'grant.issue',
-        mode: 'live',
-        grant: record.id,
-        label: record.label,
-        tiers: record.tiers,
-      })
+      await appendAudit(
+        context.vault.layout,
+        {
+          action: 'grant.issue',
+          mode: 'live',
+          grant: record.id,
+          label: record.label,
+          tiers: record.tiers,
+        },
+        context.vault.anchorsFile,
+      )
       return json({ token, id: record.id, exp: record.exp })
     },
     '/v1/grants': async () => json(context.grants.list().filter(ownedBy(ceiling, await currentTier(context, ceiling)))),
@@ -84,14 +88,18 @@ export function adminRoutes(context: DaemonContext, ceiling: Ceiling): Readonly<
         (record) => owned(record) && (record.id === id || (label !== undefined && record.label === label)),
       )
       for (const grant of revoked) context.sessions.delete(grant)
-      await appendAudit(context.vault.layout, {
-        action: 'grant.revoke',
-        mode: 'live',
-        entries: [],
-        tiers: [],
-        ...(label === undefined ? {} : { label }),
-        ...(id === undefined ? {} : { grant: id }),
-      })
+      await appendAudit(
+        context.vault.layout,
+        {
+          action: 'grant.revoke',
+          mode: 'live',
+          entries: [],
+          tiers: [],
+          ...(label === undefined ? {} : { label }),
+          ...(id === undefined ? {} : { grant: id }),
+        },
+        context.vault.anchorsFile,
+      )
       return json({ revoked })
     },
     '/v1/audit': async (request) => {

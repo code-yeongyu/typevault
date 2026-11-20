@@ -56,7 +56,11 @@ async function openSession(context: DaemonContext, ttlMs: number): Promise<strin
   const tiers = [...(await vault.keyring.reachableTiers())].sort()
   const { token, record } = grants.issue({ tiers, only: [], ttlMs, label: 'session', ceiling: SESSION_CEILING })
   atomicWrite(vault.layout.sessionFile, token, 0o600)
-  await appendAudit(vault.layout, { action: 'grant.issue', mode: 'live', grant: record.id, label: 'session', tiers })
+  await appendAudit(
+    vault.layout,
+    { action: 'grant.issue', mode: 'live', grant: record.id, label: 'session', tiers },
+    vault.anchorsFile,
+  )
   return record.id
 }
 

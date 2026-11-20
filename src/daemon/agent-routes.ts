@@ -167,13 +167,17 @@ export function agentRoutes(context: DaemonContext): Readonly<Record<string, Han
         ceiling: grant.record.ceiling,
       })
       const { record } = issued
-      await appendAudit(context.vault.layout, {
-        action: 'grant.derive',
-        mode: 'live',
-        grant: record.id,
-        label: record.label,
-        tiers: record.tiers,
-      })
+      await appendAudit(
+        context.vault.layout,
+        {
+          action: 'grant.derive',
+          mode: 'live',
+          grant: record.id,
+          label: record.label,
+          tiers: record.tiers,
+        },
+        context.vault.anchorsFile,
+      )
       return json({ token: issued.token, id: record.id, exp: record.exp })
     },
     '/v1/request': async (request) => {

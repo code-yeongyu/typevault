@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'bun:test'
+import { afterEach, beforeEach, expect, it, setDefaultTimeout } from 'bun:test'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, parse } from 'node:path'
@@ -7,6 +7,9 @@ import { localLayout } from '../core/layout'
 
 const SHORT_TMP = process.platform === 'win32' ? join(parse(tmpdir()).root, 'tmp') : '/tmp'
 const CLI = join(import.meta.dir, 'index.ts')
+// Tests here start real CLI processes, which a parallel run on a busy machine can stretch past the 5s default: the same
+// bound the CLI scenario tests use.
+setDefaultTimeout(30_000)
 let root: string
 let project: string
 let env: Record<string, string>

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it, mock, spyOn } from 'bun:test'
+import { afterEach, beforeEach, expect, it, mock, spyOn, setDefaultTimeout } from 'bun:test'
 
 import { p256 } from '@noble/curves/nist.js'
 
@@ -6,6 +6,10 @@ import { publicKeyOf } from '../core/crypto'
 import { TypeVaultError } from '../core/errors'
 import { createIdentity, type Identity, sealMemberKeyForTouchId } from '../core/identity'
 import type { Passwords } from './password'
+
+// Each test derives a human member key with Argon2, which a parallel run on a busy machine can stretch past the 5s
+// default.
+setDefaultTimeout(30_000)
 
 // The Mac's enclave and its Touch ID dialog, mocked: tests never raise the real dialog.
 let enclaveSecret = p256.utils.randomSecretKey()

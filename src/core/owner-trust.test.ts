@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { anchorAudit, appendAudit, verifyAudit } from '../audit/log'
 import { Admin } from './admin'
@@ -294,6 +294,25 @@ it('reports anchors left under another audit chain when a fresh state directory 
     ok: false,
     reason: expect.stringContaining('another audit chain'),
   })
+})
+
+it('reports, and never anchors beside, a state-directory chain under another audit identity', async () => {
+  // given a vault's own anchored chain, and a second chain's anchors file committed beside it
+  const { layout } = await setup()
+  const state = localLayout(layout.vault, { XDG_CONFIG_HOME: root, TYPEVAULT_STATE_DIR: join(root, 'state') })
+  await appendAudit(state, { action: 'read', mode: 'direct', entries: ['openai'] })
+  await anchorAudit(state)
+  const own = readFileSync(state.anchorsFile, 'utf8')
+  writeFileSync(join(dirname(state.anchorsFile), 'state-other.jsonl'), own)
+
+  // when it is verified, and when a writer anchors again
+  const verdict = verifyAudit(state, state.anchorsFileFor(loadState(state, {}).origin))
+  await appendAudit(state, { action: 'read', mode: 'direct', entries: ['openai'] })
+  await anchorAudit(state)
+
+  // then verification reports the other chain even though its own anchors exist, and no new checkpoint is published
+  expect(verdict).toMatchObject({ ok: false, reason: expect.stringContaining('another audit chain') })
+  expect(readFileSync(state.anchorsFile, 'utf8')).toBe(own)
 })
 
 it('refuses an audit chain the current owner did not sign', async () => {

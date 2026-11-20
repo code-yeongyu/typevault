@@ -85,7 +85,18 @@ export function readAudit(layout: Layout): readonly AuditRecord[] {
     .map((line) => parseJsonText(layout.auditLog, line, RecordSchema))
 }
 
+/** Another state-directory chain's anchors file beside `anchorsFile`, when `anchorsFile` is one. A vault has only one. */
+function otherStateAnchors(anchorsFile: string): string | undefined {
+  const name = basename(anchorsFile)
+  const dir = dirname(anchorsFile)
+  if (!name.startsWith('state-') || !existsSync(dir)) return undefined
+  return readdirSync(dir).find((file) => file.startsWith('state-') && file.endsWith('.jsonl') && file !== name)
+}
+
 function writeAnchor(layout: Layout, last: AuditRecord): void {
+  // Writers name the file from owner.json as it is now. When that disagrees with the chain already committed, the
+  // record stays in the local log, but no checkpoint is published under an identity verification won't check.
+  if (otherStateAnchors(layout.anchorsFile) !== undefined) return
   // The anchors live in the committed vault: a pulled symlink there must not redirect this append.
   assertNoSymlinks(dirname(layout.vault), relative(dirname(layout.vault), layout.anchorsFile))
   ensureDir(dirname(layout.anchorsFile))
@@ -131,15 +142,11 @@ export function verifyAudit(layout: Layout, anchorsFile = layout.anchorsFile): A
 }
 
 function verifyChain(layout: Layout, anchorsFile: string): AuditVerdict {
-  // A vault's state-directory chain never changes name, so anchors under another name while this one has none mean the
-  // owner history this machine accepted (on first use) isn't the vault's: report it rather than an empty, healthy chain.
+  // A vault's state-directory chain never changes name, so anchors under another name mean the owner history this
+  // machine accepted (on first use) isn't the one they were made for: report it rather than skip anchors it can't check.
   // Only verification checks this, so a stray anchors file can't keep the vault from opening.
-  const name = basename(anchorsFile)
-  const dir = dirname(anchorsFile)
-  if (name.startsWith('state-') && !existsSync(anchorsFile) && existsSync(dir)) {
-    const other = readdirSync(dir).find((file) => file.startsWith('state-') && file.endsWith('.jsonl'))
-    if (other !== undefined) return { ok: false, reason: `anchors exist only for another audit chain (${other})` }
-  }
+  const other = otherStateAnchors(anchorsFile)
+  if (other !== undefined) return { ok: false, reason: `anchors exist for another audit chain (${other})` }
   const records = readAudit(layout)
   let prev = GENESIS
   const heads = new Map<number, string>()

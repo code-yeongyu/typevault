@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect } from 'bun:test'
+import { afterEach, beforeEach, expect, setDefaultTimeout } from 'bun:test'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,6 +6,9 @@ import { join } from 'node:path'
 import { seal } from '../../core/crypto'
 
 export const CLI = join(import.meta.dir, '..', 'index.ts')
+// Each test and its setup start several real CLI processes, which a parallel run on a busy machine can stretch past
+// the 5s default: the same bound the CLI scenario tests use.
+setDefaultTimeout(30_000)
 // Low-entropy values: anything derived from them in the output would be brute-forceable.
 export const PASSWORD = 'hunter2'
 export const PIN = '123456'

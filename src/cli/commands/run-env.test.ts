@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'bun:test'
+import { afterEach, beforeEach, expect, it, setDefaultTimeout } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -16,6 +16,9 @@ import type { EntryPayload } from '../../core/payload'
 import { Vault } from '../../core/vault'
 
 const CLI = join(import.meta.dir, '..', 'index.ts')
+// Each test sets up a vault and starts real CLI processes, which a parallel run on a busy machine can stretch past the
+// 5s default: the same bound the CLI scenario tests use.
+setDefaultTimeout(30_000)
 let root: string
 
 beforeEach(() => {

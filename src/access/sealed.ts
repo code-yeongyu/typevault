@@ -71,14 +71,18 @@ export async function issueSealedGrant(vault: Vault, request: SealedRequest): Pr
   const write = { signSecret: toBase64(signing.signSecret), cert }
   const identity = await generateX25519Identity()
   const sealed = await seal([await identityToRecipient(identity)], utf8(JSON.stringify({ ...bundle, write })))
-  await appendAudit(vault.layout, {
-    action: 'grant.issue',
-    mode: 'sealed',
-    grant: id,
-    label: request.label,
-    tiers: request.tiers,
-    entries: granted.map((value) => value.name),
-  })
+  await appendAudit(
+    vault.layout,
+    {
+      action: 'grant.issue',
+      mode: 'sealed',
+      grant: id,
+      label: request.label,
+      tiers: request.tiers,
+      entries: granted.map((value) => value.name),
+    },
+    vault.anchorsFile,
+  )
   return `${PREFIX}${toBase64Url(utf8(identity))}.${toBase64Url(sealed)}`
 }
 

@@ -5,9 +5,9 @@ import { z } from 'zod'
 import { type PublicKey, type SecretKey, sign, verifySignature } from './crypto'
 import { canonicalJson, type Json, utf8 } from './encoding'
 import { TypeVaultError } from './errors'
-import { atomicWrite, ensureDir } from './fsx'
 import { readJsonFile } from './json-file'
 import type { Layout } from './layout'
+import { auditChainOf, type Owner, PublicKeySchema, readOwner as verifiedOwner, trustOwner } from './owner-trust'
 import { RevisionMarks } from './revisions'
 
 export type Tier = {
@@ -42,6 +42,10 @@ export type ManifestSeqs = {
 
 export type VaultState = {
   readonly owner: PublicKey
+  /** The vault's first owner key, its audit identity: signed by the current owner and pinned on this machine. */
+  readonly origin: string
+  /** The verified handover chain that led to `owner`. */
+  readonly handovers: Owner['handovers']
   /** Each manifest's sequence number: every signed change bumps it, and a lower one is a rollback. */
   readonly seqs: ManifestSeqs
   readonly tiers: Tiers
@@ -61,7 +65,6 @@ export function parseMemberName(name: string): string {
   return name
 }
 
-const PublicKeySchema = z.object({ recipient: z.string().startsWith('age1'), signPublic: z.string() })
 const TierSchema = PublicKeySchema.extend({ includes: z.array(z.string()), gen: z.number().int().positive() })
 const seq = z.number().int().positive()
 const TiersBody = z.object({ v: z.literal(1), seq, tiers: z.record(z.string(), TierSchema) })
@@ -83,7 +86,6 @@ const SignersBody = z.object({
   signers: z.record(z.string(), z.object({ signPublic: z.string(), tiers: z.array(z.string()) })),
 })
 const CeilingsBody = z.object({ v: z.literal(1), seq, ceilings: z.record(z.string(), z.string()) })
-const TrustSchema = z.object({ ownerSignPublic: z.string() })
 
 export const signedDoc = (body: Json, key: SecretKey): string =>
   `${JSON.stringify({ body, sig: sign(key.signSecret, utf8(canonicalJson(body))) }, null, 2)}\n`
@@ -106,24 +108,6 @@ function readSigned<T extends Json>(path: string, schema: z.ZodType<T>, owner: P
   return parsed.data
 }
 
-/** The owner key is trusted on first use (or pinned via TYPEVAULT_OWNER); a changed key is tampering. */
-function checkTrust(layout: Layout, owner: PublicKey, env: Readonly<Record<string, string | undefined>>): void {
-  const pinned = env['TYPEVAULT_OWNER']
-  if (pinned !== undefined && pinned !== '') {
-    if (pinned !== owner.signPublic) throw new TypeVaultError('tampered', 'vault owner does not match TYPEVAULT_OWNER')
-    return
-  }
-  if (!existsSync(layout.trustFile)) {
-    ensureDir(layout.root, 0o700)
-    atomicWrite(layout.trustFile, JSON.stringify({ ownerSignPublic: owner.signPublic }), 0o600)
-    return
-  }
-  const trust = readJsonFile(layout.trustFile, TrustSchema)
-  if (trust.ownerSignPublic !== owner.signPublic) {
-    throw new TypeVaultError('tampered', 'vault owner key changed since this machine first trusted it')
-  }
-}
-
 export function readOwner(layout: Layout): PublicKey {
   if (!existsSync(layout.ownerFile))
     throw new TypeVaultError('not_found', `no vault at ${layout.vault} (run typevault init)`)
@@ -131,14 +115,25 @@ export function readOwner(layout: Layout): PublicKey {
 }
 
 export function loadState(layout: Layout, env: Readonly<Record<string, string | undefined>> = process.env): VaultState {
-  const owner = readOwner(layout)
-  checkTrust(layout, owner, env)
+  const owner = verifiedOwner(layout)
   const tiers = readSigned(layout.tiersFile, TiersBody, owner)
   const members = readSigned(layout.membersFile, MembersBody, owner)
   const signers = readSigned(layout.signersFile, SignersBody, owner)
   const ceilings = readSigned(layout.ceilingsFile, CeilingsBody, owner)
   // An older, still validly signed manifest from git history would resurrect removed signers or ceilings.
   const marks = new RevisionMarks(layout.revisionsFile)
+  if (!marks.accept('owner:handovers', owner.handovers.length)) {
+    throw new TypeVaultError('tampered', 'owner.json has fewer handovers than this machine has seen')
+  }
+  // The current owner signs the audit chain, so trusting that owner authenticates it. A machine also pins the first
+  // chain it trusted, so no later owner.json can move its audit anchors elsewhere.
+  const auditChain = auditChainOf(owner)
+  const pinned = `owner:audit:${auditChain}`
+  if (!marks.allows('owner:audit', 0) && marks.allows(pinned, 0)) {
+    throw new TypeVaultError('tampered', 'owner.json names a different audit chain than this machine trusted')
+  }
+  marks.accept('owner:audit', 1)
+  marks.accept(pinned, 1)
   for (const [name, doc] of [
     ['tiers', tiers],
     ['members', members],
@@ -152,9 +147,12 @@ export function loadState(layout: Layout, env: Readonly<Record<string, string | 
       )
     }
   }
+  trustOwner(layout, owner, env['TYPEVAULT_OWNER'])
   marks.save()
   return {
     owner,
+    origin: auditChain,
+    handovers: owner.handovers,
     seqs: { tiers: tiers.seq, members: members.seq, signers: signers.seq, ceilings: ceilings.seq },
     tiers: tiers.tiers,
     members: members.members,

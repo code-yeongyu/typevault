@@ -51,12 +51,16 @@ export class ScopedVault implements Access {
 
   #audit(event: Omit<AuditEvent, 'mode' | 'grant' | 'label'>): Promise<void> {
     const { mode, grant, label } = this.#identity
-    return appendAudit(this.#vault.layout, {
-      ...event,
-      mode,
-      ...(grant === undefined ? {} : { grant }),
-      ...(label === undefined ? {} : { label }),
-    })
+    return appendAudit(
+      this.#vault.layout,
+      {
+        ...event,
+        mode,
+        ...(grant === undefined ? {} : { grant }),
+        ...(label === undefined ? {} : { label }),
+      },
+      this.#vault.anchorsFile,
+    )
   }
 
   #allows(entry: StoredEntry): boolean {

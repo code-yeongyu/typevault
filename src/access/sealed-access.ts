@@ -47,11 +47,15 @@ export class SealedAccess implements Access {
     return Vault.open(this.#layout, [], this.#env)
   }
 
-  /** Best effort: a sealed grant may run where no vault directory exists. */
-  async #audit(event: Omit<AuditEvent, 'mode' | 'grant' | 'label'>): Promise<void> {
+  /**
+   * Best effort: a sealed grant may run where no vault directory exists. Writes pass the anchors file of the vault they
+   * opened; reads don't open it, so they have none.
+   */
+  async #audit(event: Omit<AuditEvent, 'mode' | 'grant' | 'label'>, anchorsFile?: string): Promise<void> {
     const layout = this.#layout
     if (layout === undefined || !existsSync(layout.ownerFile)) return
-    await appendAudit(layout, { ...event, mode: 'sealed', grant: this.#bundle.id, label: this.#bundle.label })
+    const record = { ...event, mode: 'sealed' as const, grant: this.#bundle.id, label: this.#bundle.label }
+    await appendAudit(layout, record, anchorsFile ?? layout.fixedAnchorsFile)
   }
 
   async list(): Promise<readonly EntrySummary[]> {
@@ -97,7 +101,7 @@ export class SealedAccess implements Access {
       { ref: { kind: 'cert', cert: bundle.write.cert }, signSecret: sealedSigningSecret(bundle) },
       { ...(ifRev === undefined ? {} : { ifRev }), ...(prior === undefined ? {} : { base: prior }) },
     )
-    await this.#audit({ action: 'write', entries: [input.name], tiers: [tier] })
+    await this.#audit({ action: 'write', entries: [input.name], tiers: [tier] }, vault.anchorsFile)
     const { envelope, payload } = stored
     return {
       name: payload.name,
@@ -129,7 +133,7 @@ export class SealedAccess implements Access {
         allowsEntry([{ tiers: cert.tiers, only: cert.only }], vault.state, envelope.tier, name) &&
         signerAuthority({ kind: 'cert', cert }, envelope.tier, vault.state, new Date().toISOString()) !== undefined,
     )
-    await this.#audit({ action: 'remove', entries: [name] })
+    await this.#audit({ action: 'remove', entries: [name] }, vault.anchorsFile)
   }
 
   async move(from: EntryName, to: EntryName): Promise<void> {

@@ -27,7 +27,8 @@ then re-set it in TypeVault to clear the flag. Old keys can still decrypt histor
 values; changing tier keys cannot revoke those values at their source.
 
 The owner key is never stored in the clear: it exists only wrapped to owner members, so an owner's password and
-Secret Key are the recovery path. Owner key rotation is not supported yet.
+Secret Key are the recovery path. Removing an owner (`member rm`) rotates the owner key; it needs another owner to
+remain.
 
 `identity export --to 1password` uses the `op` CLI when installed, else the 1Password app (`--via sdk|op` to choose;
 `--account` is required for the app or when several `op` accounts are signed in). The Secret Key, or a machine's key,

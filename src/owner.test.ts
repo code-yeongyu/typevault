@@ -126,12 +126,12 @@ describe('a state directory shared by openers', () => {
     // when each appends and anchors
     for (const layout of openers) {
       await appendAudit(layout, { action: 'read', mode: 'direct' })
-      await anchorAudit(layout)
+      await anchorAudit(layout, layout.anchorsFile)
     }
 
     // then there is one chain and one anchors file
     expect(readdirSync(join(dir, 'audit-anchors'))).toHaveLength(1)
-    expect(openers.map(verifyAudit)).toEqual([
+    expect(openers.map((opener) => verifyAudit(opener))).toEqual([
       { ok: true, records: 2 },
       { ok: true, records: 2 },
     ])
@@ -142,7 +142,7 @@ describe('a state directory shared by openers', () => {
     await provision()
     const layout = localLayout(dir, { TYPEVAULT_STATE_DIR: stateDir })
     await appendAudit(layout, { action: 'read', mode: 'direct' })
-    await anchorAudit(layout)
+    await anchorAudit(layout, layout.anchorsFile)
 
     // when the audit directory goes, log and all
     rmSync(join(stateDir, 'audit'), { recursive: true })
@@ -164,7 +164,7 @@ describe('a state directory shared by openers', () => {
     // when each anchors its own log
     for (const layout of layouts) {
       await appendAudit(layout, { action: 'read', mode: 'direct' })
-      await anchorAudit(layout)
+      await anchorAudit(layout, layout.anchorsFile)
     }
 
     // then each host keeps its own anchors file

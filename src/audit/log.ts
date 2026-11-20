@@ -1,5 +1,15 @@
-import { appendFileSync, closeSync, existsSync, fsyncSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
-import { dirname, relative } from 'node:path'
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  fsyncSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  statSync,
+} from 'node:fs'
+import { basename, dirname, relative } from 'node:path'
 
 import { z } from 'zod'
 
@@ -75,15 +85,46 @@ export function readAudit(layout: Layout): readonly AuditRecord[] {
     .map((line) => parseJsonText(layout.auditLog, line, RecordSchema))
 }
 
-function writeAnchor(layout: Layout, last: AuditRecord): void {
-  // The anchors live in the committed vault: a pulled symlink there must not redirect this append.
-  assertNoSymlinks(dirname(layout.vault), relative(dirname(layout.vault), layout.anchorsFile))
-  ensureDir(dirname(layout.anchorsFile))
-  appendLine(layout.anchorsFile, JSON.stringify({ seq: last.seq, hash: last.hash, at: last.at }))
+/** Another state-directory chain's anchors file beside `anchorsFile`, when `anchorsFile` is one. A vault has only one. */
+function otherStateAnchors(anchorsFile: string): string | undefined {
+  const name = basename(anchorsFile)
+  const dir = dirname(anchorsFile)
+  if (!name.startsWith('state-') || !existsSync(dir)) return undefined
+  return readdirSync(dir).find((file) => file.startsWith('state-') && file.endsWith('.jsonl') && file !== name)
 }
 
-/** Appends one hash-chained record; every 100th record's head is anchored in the (committable) vault. */
-export function appendAudit(layout: Layout, event: AuditEvent): Promise<void> {
+function writeAnchor(layout: Layout, anchorsFile: string, last: AuditRecord): void {
+  assertInVault(layout, anchorsFile)
+  ensureDir(dirname(anchorsFile))
+  appendLine(anchorsFile, JSON.stringify({ seq: last.seq, hash: last.hash, at: last.at }))
+}
+
+// The anchors live in the committed vault: a pulled symlink there must not redirect a read or an append.
+const assertInVault = (layout: Layout, anchorsFile: string): void =>
+  assertNoSymlinks(dirname(layout.vault), relative(dirname(layout.vault), anchorsFile))
+
+/**
+ * The last checkpoint's seq, for catching up deferred ones. An anchors file it can't read or parse gives undefined
+ * rather than throwing: this runs after the operation being audited took effect, checkpoint writes keep their own
+ * checks, and verification reports the damage.
+ */
+function lastAnchoredSeq(layout: Layout, anchorsFile: string): number | undefined {
+  try {
+    assertInVault(layout, anchorsFile)
+    if (!existsSync(anchorsFile)) return 0
+    const last = readFileSync(anchorsFile, 'utf8').trimEnd().split('\n').at(-1)
+    return last === undefined || last === '' ? 0 : AnchorSchema.parse(JSON.parse(last)).seq
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Appends one hash-chained record; every 100th record's head is anchored in the (committable) vault. `anchorsFile` is
+ * the one a validated vault state names. Without it, a state-directory chain has no trusted destination: the record
+ * stays in the local log and its checkpoint waits for the next write that has one.
+ */
+export function appendAudit(layout: Layout, event: AuditEvent, anchorsFile = layout.fixedAnchorsFile): Promise<void> {
   return withLock(layout.auditLock, 'exclusive', async () => {
     ensureDir(layout.audit, 0o700)
     const last = readLast(layout)
@@ -91,15 +132,19 @@ export function appendAudit(layout: Layout, event: AuditEvent): Promise<void> {
     const unhashed = { ...fields, seq: (last?.seq ?? 0) + 1, at: new Date().toISOString(), prev: last?.hash ?? GENESIS }
     const record = { ...unhashed, hash: hashOf(unhashed) }
     appendLine(layout.auditLog, JSON.stringify(record))
-    if (record.seq % ANCHOR_EVERY === 0) writeAnchor(layout, record)
+    if (anchorsFile === undefined) return
+    const anchored = record.seq % ANCHOR_EVERY === 0 ? undefined : lastAnchoredSeq(layout, anchorsFile)
+    const due = record.seq % ANCHOR_EVERY === 0 || (anchored !== undefined && record.seq - anchored >= ANCHOR_EVERY)
+    if (due) writeAnchor(layout, anchorsFile, record)
   })
 }
 
-/** Anchors the current head now, e.g. when the daemon stops. */
-export function anchorAudit(layout: Layout): Promise<void> {
+/** Anchors the current head now, in the anchors file a validated vault state names. */
+export function anchorAudit(layout: Layout, anchorsFile = layout.fixedAnchorsFile): Promise<void> {
   return withLock(layout.auditLock, 'exclusive', async () => {
     const last = readAudit(layout).at(-1)
-    if (last !== undefined) writeAnchor(layout, last)
+    if (anchorsFile === undefined || last === undefined) return
+    writeAnchor(layout, anchorsFile, last)
   })
 }
 
@@ -107,17 +152,25 @@ export type AuditVerdict =
   | { readonly ok: true; readonly records: number }
   | { readonly ok: false; readonly reason: string }
 
-/** Recomputes the chain and checks every anchor against it. A log too damaged to read fails the check. */
-export function verifyAudit(layout: Layout): AuditVerdict {
+/**
+ * Recomputes the chain and checks every anchor against it. A log too damaged to read fails the check. `anchorsFile`
+ * defaults to the one owner.json names; pass the one a validated vault state names instead.
+ */
+export function verifyAudit(layout: Layout, anchorsFile = layout.anchorsFile): AuditVerdict {
   try {
-    return verifyChain(layout)
+    return verifyChain(layout, anchorsFile)
   } catch (error) {
     if (error instanceof TypeVaultError && error.code === 'tampered') return { ok: false, reason: error.message }
     throw error
   }
 }
 
-function verifyChain(layout: Layout): AuditVerdict {
+function verifyChain(layout: Layout, anchorsFile: string): AuditVerdict {
+  // A vault's state-directory chain never changes name, so anchors under another name mean the owner history this
+  // machine accepted (on first use) isn't the one they were made for: report it rather than skip anchors it can't check.
+  // Only verification checks this, so a stray anchors file can't keep the vault from opening.
+  const other = otherStateAnchors(anchorsFile)
+  if (other !== undefined) return { ok: false, reason: `anchors exist for another audit chain (${other})` }
   const records = readAudit(layout)
   let prev = GENESIS
   const heads = new Map<number, string>()
@@ -130,7 +183,7 @@ function verifyChain(layout: Layout): AuditVerdict {
     heads.set(record.seq, hash)
     prev = hash
   }
-  const anchors = [layout.legacyAnchorsFile, layout.anchorsFile].flatMap((file) =>
+  const anchors = [layout.legacyAnchorsFile, anchorsFile].flatMap((file) =>
     existsSync(file)
       ? readFileSync(file, 'utf8')
           .split('\n')

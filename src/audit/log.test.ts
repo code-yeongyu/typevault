@@ -33,6 +33,36 @@ it('chains records so the log verifies', async () => {
   expect(readAudit(layout).map((record) => record.seq)).toEqual([1, 2])
 })
 
+it('records an event outside a checkpoint despite a damaged anchors tail, and leaves the damage to verification', async () => {
+  // given an anchored log whose anchors file ends in a malformed line
+  await read(['github/bot'])
+  await anchorAudit(layout)
+  const anchorsFile = layout.fixedAnchorsFile ?? ''
+  writeFileSync(anchorsFile, `${readFileSync(anchorsFile, 'utf8')}{not json\n`)
+
+  // when a record that isn't a checkpoint is appended
+  const appending = read(['openai'])
+
+  // then it lands in the log, and verification still reports the damaged anchors
+  await expect(appending).resolves.toBeUndefined()
+  expect(readAudit(layout).map((record) => record.seq)).toEqual([1, 2])
+  expect(verifyAudit(layout)).toMatchObject({ ok: false })
+})
+
+it('records an event outside a checkpoint when the anchors file cannot be read', async () => {
+  // given an anchors file that is a directory, so reading it fails
+  await read(['github/bot'])
+  mkdirSync(layout.fixedAnchorsFile ?? '', { recursive: true })
+
+  // when a record that isn't a checkpoint is appended
+  const appending = read(['openai'])
+
+  // then it lands in the log, and verification still refuses the anchors
+  await expect(appending).resolves.toBeUndefined()
+  expect(readAudit(layout).map((record) => record.seq)).toEqual([1, 2])
+  expect(() => verifyAudit(layout)).toThrow()
+})
+
 it('detects an edited record', async () => {
   await read(['github/bot'])
   await read(['openai'])

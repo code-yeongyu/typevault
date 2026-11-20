@@ -4,6 +4,7 @@ import { userInfo } from 'node:os'
 import { defineCommand } from 'citty'
 
 import { parseTtl } from '../../access/scope'
+import { Admin } from '../../core/admin'
 import { publicKeyOf } from '../../core/crypto'
 import { TypeVaultError } from '../../core/errors'
 import { atomicWrite } from '../../core/fsx'
@@ -21,7 +22,7 @@ import {
   writeIdentity,
 } from '../../core/identity'
 import { type Layout, localLayout, vaultIdOf } from '../../core/layout'
-import { readOwner } from '../../core/state'
+import { readOwner } from '../../core/owner-trust'
 import { Vault } from '../../core/vault'
 import { worktreeVaults } from '../../core/worktrees'
 import { endLiveGrants, stopDaemon } from '../../daemon/spawn'
@@ -32,6 +33,7 @@ import {
   findLayout,
   layoutFrom,
   openAdmin,
+  openDirect,
   openPublic,
   unlockSession,
   worktreeSessions,
@@ -137,8 +139,18 @@ export const member = defineCommand({
       meta: { name: 'rm', description: 'Remove a member and rotate every tier they reached' },
       args: { name: { type: 'positional', required: true } },
       async run({ args }) {
-        const affected = await (await openAdmin(process.env)).removeMember(args.name)
-        print(`removed ${args.name}`)
+        const vault = await openDirect(process.env)
+        const previous = vault.state.owner.signPublic
+        const before = Object.keys(vault.state.members)
+        const affected = await new Admin(vault).removeMember(args.name)
+        const removed = before.filter((name) => vault.state.members[name] === undefined)
+        print(`removed ${removed.join(', ')}`)
+        if (removed.length > 1) note(`${removed.join(', ')} shared one key, so all of them were removed.`)
+        if (vault.state.owner.signPublic !== previous) {
+          note(
+            'Owner key rotated. Commit the vault; members must pull it. For an open session, run typevault lock then typevault unlock.',
+          )
+        }
         if (affected.length === 0) return
         note('They may have kept what they read. Rotate these secrets at their source, then re-set them:')
         for (const name of affected) note(`  ${name}`)
@@ -248,9 +260,11 @@ export const lock = defineCommand({
     if (layout === undefined) throw new TypeVaultError('not_found', 'no vault here')
     const env = process.env
     // An owner that can't be read doesn't prove another vault, so lock still reaches it.
-    const ownerOf = (target: Layout): string | undefined => {
+    // Every key the signature-verified handover chain passed through, ending at the current one.
+    const ownerOf = (target: Layout): { readonly keys: ReadonlySet<string> } | undefined => {
       try {
-        return readOwner(target).signPublic
+        const owner = readOwner(target)
+        return { keys: new Set([...owner.handovers.map(({ from }) => from), owner.signPublic]) }
       } catch (error) {
         if (error instanceof TypeVaultError) return undefined
         throw error
@@ -263,7 +277,9 @@ export const lock = defineCommand({
       .map((vault) => localLayout(vault, env))
       .filter((worktree) => {
         const other = ownerOf(worktree)
-        return own === undefined || other === undefined || other === own
+        // Any owner key both verified chains passed through: the same vault on another generation (one that hasn't pulled
+        // a rotation yet) or rotated independently from a common owner. Claimed origins alone could disagree.
+        return own === undefined || other === undefined || [...other.keys].some((key) => own.keys.has(key))
       })
     // A session unlocked in any other worktree would only be shared here again on the next read, so it stops too, but
     // the grants of a different vault are its own.

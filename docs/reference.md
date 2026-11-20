@@ -4,20 +4,20 @@ Environment variables, on-disk layout, and known limits.
 
 ## Environment
 
-| Variable                                        | Effect                                                                                      |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `TYPEVAULT_GRANT`                               | The grant this process uses; unset means the unlocked session, or direct mode for a machine |
-| `TYPEVAULT_GLOBAL`                              | Same as `-g`                                                                                |
-| `TYPEVAULT_DIR`                                 | Use the vault at this path as the global one (default `~/.typevault`)                       |
-| `TYPEVAULT_KEY`                                 | A machine member's key, instead of the identity file (`identity export`)                    |
-| `TYPEVAULT_TIER`                                | Default tier for `set`                                                                      |
-| `TYPEVAULT_CEILING`                             | Admin socket to grant through (default `default`)                                           |
-| `TYPEVAULT_OWNER`                               | Pin the owner key instead of trusting it on first use                                       |
-| `TYPEVAULT_PROMPT_PORT`, `TYPEVAULT_PUBLIC_URL` | Where the daemon serves `request` pages                                                     |
-| `TYPEVAULT_STATE_DIR`                           | The vault's private state, instead of `checkouts/<id>/`; one machine at a time              |
-| `TYPEVAULT_RUN_DIR`                             | Where the daemon's sockets live, for a state directory too deep for a socket path           |
-| `TYPEVAULT_HOST_ID`                             | This machine's name in `daemon.holder` and audit anchors (default: the machine ID's hash)   |
-| `TYPEVAULT_DEBUG`                               | Set to `1` to include unexpected CLI error stacks in diagnostics                            |
+| Variable                                        | Effect                                                                                            |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `TYPEVAULT_GRANT`                               | The grant this process uses; unset means the unlocked session, or direct mode for a machine       |
+| `TYPEVAULT_GLOBAL`                              | Same as `-g`                                                                                      |
+| `TYPEVAULT_DIR`                                 | Use the vault at this path as the global one (default `~/.typevault`)                             |
+| `TYPEVAULT_KEY`                                 | A machine member's key, instead of the identity file (`identity export`)                          |
+| `TYPEVAULT_TIER`                                | Default tier for `set`                                                                            |
+| `TYPEVAULT_CEILING`                             | Admin socket to grant through (default `default`)                                                 |
+| `TYPEVAULT_OWNER`                               | Pin the owner key (or an earlier one it was handed over from) instead of trusting it on first use |
+| `TYPEVAULT_PROMPT_PORT`, `TYPEVAULT_PUBLIC_URL` | Where the daemon serves `request` pages                                                           |
+| `TYPEVAULT_STATE_DIR`                           | The vault's private state, instead of `checkouts/<id>/`; one machine at a time                    |
+| `TYPEVAULT_RUN_DIR`                             | Where the daemon's sockets live, for a state directory too deep for a socket path                 |
+| `TYPEVAULT_HOST_ID`                             | This machine's name in `daemon.holder` and audit anchors (default: the machine ID's hash)         |
+| `TYPEVAULT_DEBUG`                               | Set to `1` to include unexpected CLI error stacks in diagnostics                                  |
 
 ## Layout
 

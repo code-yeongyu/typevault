@@ -96,13 +96,17 @@ export class PromptRequests {
         }
         if (!session.isLive()) throw new TypeVaultError('denied', 'the requesting grant is no longer live')
         await session.access.set({ name: input.name, fields: payload.fields, tier })
-        await appendAudit(this.#vault.layout, {
-          action: 'request.stored',
-          mode: 'live',
-          grant: grant.id,
-          label: grant.label,
-          entries: [input.name],
-        })
+        await appendAudit(
+          this.#vault.layout,
+          {
+            action: 'request.stored',
+            mode: 'live',
+            grant: grant.id,
+            label: grant.label,
+            entries: [input.name],
+          },
+          this.#vault.anchorsFile,
+        )
         await handle.accept()
         return input.name
       } catch (error) {
@@ -111,13 +115,17 @@ export class PromptRequests {
             ? error
             : new TypeVaultError('unavailable', 'the submitted secret could not be stored')
         try {
-          await appendAudit(this.#vault.layout, {
-            action: 'request.rejected',
-            mode: 'live',
-            grant: grant.id,
-            label: grant.label,
-            entries: [input.name],
-          })
+          await appendAudit(
+            this.#vault.layout,
+            {
+              action: 'request.rejected',
+              mode: 'live',
+              grant: grant.id,
+              label: grant.label,
+              entries: [input.name],
+            },
+            this.#vault.anchorsFile,
+          )
         } finally {
           await handle.reject(rejected)
         }
@@ -134,15 +142,19 @@ export class PromptRequests {
       if (!(error instanceof TypeVaultError)) console.error('typevault daemon: storing a prompted secret failed', error)
     })
     this.#pending.set(handle.id, { owner: grant.id, stored })
-    await appendAudit(this.#vault.layout, {
-      action: 'request.open',
-      mode: 'live',
-      grant: grant.id,
-      label: grant.label,
-      entries: [input.name],
-      tiers: [tier],
-      reason: input.reason,
-    })
+    await appendAudit(
+      this.#vault.layout,
+      {
+        action: 'request.open',
+        mode: 'live',
+        grant: grant.id,
+        label: grant.label,
+        entries: [input.name],
+        tiers: [tier],
+        reason: input.reason,
+      },
+      this.#vault.anchorsFile,
+    )
     return { id: handle.id, url: handle.url, code, expiresAt }
   }
 

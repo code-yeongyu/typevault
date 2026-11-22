@@ -22,6 +22,7 @@ const RecordSchema = z.object({
   /** The admin socket that issued it (derived grants inherit it). */
   ceiling: z.string(),
   revoked: z.boolean().optional(),
+  readOnly: z.literal(true).optional(),
 })
 export type GrantRecord = z.infer<typeof RecordSchema>
 export type GrantRequest = {
@@ -31,10 +32,16 @@ export type GrantRequest = {
   readonly label: string
   readonly parent?: string
   readonly ceiling: string
+  readonly readOnly?: true
 }
 export type ResolvedGrant = { readonly record: GrantRecord; readonly chain: ScopeChain }
 
 const PREFIX = 'tvl1'
+
+// Older daemons ignore unknown record fields and hash a single dot-free token segment.
+// Domain-separate read-only secrets so a downgrade cannot reinterpret one as a writer.
+const hashSecret = (secret: string, readOnly?: true): string =>
+  sha256Hex(utf8(readOnly ? `${PREFIX}.read-only.${secret}` : secret))
 
 /**
  * The ceiling name marking an unlocked session's grant (and grants derived from it). It is no valid ceiling name,
@@ -47,7 +54,7 @@ export const MAX_CHAIN = 8
 
 /**
  * Live grants, persisted (hashed) so a daemon restart doesn't cut issued grants off. `typevault lock` ends them.
- * A token is `tvl1.<id>.<secret>`; only sha256(secret) is stored.
+ * A token is `tvl1.<id>.<secret>`; only a hash of its secret is stored.
  */
 export class GrantStore {
   readonly #path: string
@@ -68,6 +75,7 @@ export class GrantStore {
     const parent = request.parent === undefined ? undefined : this.#records.find((r) => r.id === request.parent)
     let links = 1
     for (let link = parent; link !== undefined; links++) {
+      if (link.readOnly) throw new TypeVaultError('denied', 'this grant is read-only')
       const parentId = link.parent
       link = parentId === undefined ? undefined : this.#records.find((r) => r.id === parentId)
     }
@@ -79,13 +87,14 @@ export class GrantStore {
     const secret = randomToken(32)
     const record: GrantRecord = {
       id: randomHex(8),
-      hash: sha256Hex(utf8(secret)),
+      hash: hashSecret(secret, request.readOnly),
       label: request.label,
       tiers: [...request.tiers],
       only: [...request.only],
       exp: new Date(exp).toISOString(),
       created: new Date().toISOString(),
       ceiling: request.ceiling,
+      ...(request.readOnly === undefined ? {} : { readOnly: request.readOnly }),
       ...(request.parent === undefined ? {} : { parent: request.parent }),
     }
     this.#records.push(record)
@@ -101,7 +110,7 @@ export class GrantStore {
       prefix !== PREFIX ||
       secret === undefined ||
       record === undefined ||
-      !timingSafeEqual(Buffer.from(record.hash, 'hex'), Buffer.from(sha256Hex(utf8(secret)), 'hex'))
+      !timingSafeEqual(Buffer.from(record.hash, 'hex'), Buffer.from(hashSecret(secret, record.readOnly), 'hex'))
     ) {
       throw new TypeVaultError('denied', 'unknown grant')
     }

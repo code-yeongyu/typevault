@@ -10,20 +10,24 @@ import { TypeVaultError } from '../core/errors'
 import { atomicWrite } from '../core/fsx'
 import { readJsonFile } from '../core/json-file'
 
-const RecordSchema = z.object({
-  id: z.string(),
-  hash: z.string(),
-  label: z.string(),
-  tiers: z.array(z.string()),
-  only: z.array(z.string()),
-  exp: z.iso.datetime(),
-  created: z.iso.datetime(),
-  parent: z.string().optional(),
-  /** The admin socket that issued it (derived grants inherit it). */
-  ceiling: z.string(),
-  revoked: z.boolean().optional(),
-  readOnly: z.literal(true).optional(),
-})
+// Older daemons preserve IDs when they rewrite the grant store, but drop unknown fields.
+const READ_ONLY_ID = 'ro-'
+const RecordSchema = z
+  .object({
+    id: z.string(),
+    hash: z.string(),
+    label: z.string(),
+    tiers: z.array(z.string()),
+    only: z.array(z.string()),
+    exp: z.iso.datetime(),
+    created: z.iso.datetime(),
+    parent: z.string().optional(),
+    /** The admin socket that issued it (derived grants inherit it). */
+    ceiling: z.string(),
+    revoked: z.boolean().optional(),
+    readOnly: z.literal(true).optional(),
+  })
+  .transform((record) => (record.id.startsWith(READ_ONLY_ID) ? { ...record, readOnly: true as const } : record))
 export type GrantRecord = z.infer<typeof RecordSchema>
 export type GrantRequest = {
   readonly tiers: readonly string[]
@@ -86,7 +90,7 @@ export class GrantStore {
     const exp = parent === undefined ? requestedExp : Math.min(requestedExp, Date.parse(parent.exp))
     const secret = randomToken(32)
     const record: GrantRecord = {
-      id: randomHex(8),
+      id: `${request.readOnly ? READ_ONLY_ID : ''}${randomHex(8)}`,
       hash: hashSecret(secret, request.readOnly),
       label: request.label,
       tiers: [...request.tiers],

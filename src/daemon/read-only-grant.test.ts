@@ -1,5 +1,5 @@
 import { expect, it } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, parse } from 'node:path'
 
@@ -52,7 +52,13 @@ it('keeps an SDK-issued read-only grant scoped and denies mutations and delegati
     // The previous daemon only compares the legacy hash of this single token segment.
     expect(readFileSync(layout.grantsFile, 'utf8')).not.toContain(sha256Hex(utf8(secret)))
     await daemon.stop()
+    // A pre-feature daemon preserves known fields but strips readOnly before saving.
+    const saved = z
+      .array(z.object({ readOnly: z.literal(true).optional() }).passthrough())
+      .parse(JSON.parse(readFileSync(layout.grantsFile, 'utf8')))
+    writeFileSync(layout.grantsFile, JSON.stringify(saved.map(({ readOnly: _discarded, ...record }) => record)))
     daemon = await start()
+    expect(await admin.list()).toContainEqual(expect.objectContaining({ label: request.label, readOnly: true }))
 
     const reader = new LiveAccess(layout.agentSocket, token)
     expect((await reader.list()).map((entry) => entry.name)).toEqual([name])

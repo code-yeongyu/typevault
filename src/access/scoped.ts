@@ -3,6 +3,7 @@ import { signerOf } from '../core/entries'
 import { TypeVaultError } from '../core/errors'
 import { withLock } from '../core/lock'
 import { type EntryName, type Field, matchesOnly } from '../core/naming'
+import { storeRefreshedFields } from '../core/refresh-writeback'
 import { resolveName, type StoredEntry, type Vault } from '../core/vault'
 import { needsRefresh, refreshOAuth } from '../oauth/refresh'
 import { secretValues } from './env'
@@ -128,15 +129,7 @@ export class ScopedVault implements Access {
   }
 
   async #storeRefreshed(entry: StoredEntry, fields: Readonly<Record<string, Field>>): Promise<StoredEntry> {
-    const { name, env, origin, tags } = entry.payload
-    const input = {
-      name,
-      fields,
-      tier: entry.envelope.tier,
-      tags,
-      ...(env === undefined ? {} : { env }),
-      ...(origin === undefined ? {} : { origin }),
-    }
+    const { name } = entry.payload
     // A read must not promote the original writer's metadata to the reader's authority. Reuse its owner/tier
     // key when held; certificates and unavailable signing keys narrow to the entry's own tier.
     const { signer, tier } = entry.envelope
@@ -148,7 +141,7 @@ export class ScopedVault implements Access {
           : undefined
     const key = original ?? (await this.#vault.keyring.unlock(tier))
     if (key === undefined) throw new TypeVaultError('denied', `no key here can refresh tier "${tier}"`)
-    const refreshed = await this.#vault.put(input, signerOf(key))
+    const refreshed = await storeRefreshedFields(this.#vault, entry, fields, signerOf(key))
     await this.#audit({ action: 'refresh', entries: [name] })
     return refreshed
   }

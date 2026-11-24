@@ -3,10 +3,9 @@ import { z } from 'zod'
 import { seal, type SecretKey, sha256Hex, sign, unseal, verifySignature } from './crypto'
 import { canonicalJson, fromBase64, type Json, toBase64, utf8 } from './encoding'
 import { TypeVaultError } from './errors'
-import type { Keyring } from './keyring'
+import { reach, reachesTier, type VaultState } from './model'
 import { matchesOnly } from './naming'
 import { decodePayload, encodePayload, type EntryPayload } from './payload'
-import { reach, reachesTier, type VaultState } from './state'
 
 const IssuerSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('owner') }),
@@ -195,7 +194,10 @@ export function verifyEnvelope(envelope: Envelope, state: VaultState, options: V
   return verifySignature(signPublic, envelopeBytes(envelope), envelope.sig) ? undefined : 'bad signature'
 }
 
-export async function openEntry(envelope: Envelope, keyring: Keyring): Promise<EntryPayload | undefined> {
+/** Whatever resolves the current key of a tier: the file-backed `Keyring`, or a store's own unwrapped keys. */
+export type TierKeys = { unlock(tier: string): Promise<SecretKey | undefined> }
+
+export async function openEntry(envelope: Envelope, keyring: TierKeys): Promise<EntryPayload | undefined> {
   const key = await keyring.unlock(envelope.tier)
   if (key === undefined) return undefined
   const payload = decodePayload(await unseal([key.identity], fromBase64(envelope.payload)))

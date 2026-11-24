@@ -13,7 +13,7 @@ export type KeyRole =
   | { readonly kind: 'member'; readonly name: string }
 
 /** An age identity string, or a non-extractable WebCrypto X25519 private key that never leaves its store. */
-export type Identity = string | CryptoKey
+export type Identity = Parameters<typeof identityToRecipient>[0]
 
 /** An age identity for decryption plus an Ed25519 key for signing. */
 export type SecretKey = { readonly role: KeyRole; readonly identity: string; readonly signSecret: Uint8Array }

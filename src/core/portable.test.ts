@@ -59,6 +59,14 @@ describe('the portable core', () => {
     )
   })
 
+  test('calls no Bun global, which a browser does not have', async () => {
+    const { files } = await importGraph(ENTRY)
+    const users = await Promise.all(
+      [...files].map(async (file) => ((await Bun.file(file).text()).includes('Bun.') ? [file] : [])),
+    )
+    expect(users.flat()).toEqual([])
+  })
+
   test('bundles for the browser target', async () => {
     const result = await Bun.build({ entrypoints: [ENTRY], target: 'browser' })
     expect(result.success).toBe(true)
@@ -126,9 +134,10 @@ describe('entries without a vault directory', () => {
       signerOf(tierKey),
     )
     expect(verifyEnvelope(envelope, state)).toBeUndefined()
-    expect(await openEntry(envelope, { unlock: async (tier) => (tier === 'mesh' ? tierKey : undefined) })).toEqual(
-      payload,
-    )
+    const noGrants = () => false
+    expect(
+      await openEntry(envelope, { unlock: async (tier) => (tier === 'mesh' ? tierKey : undefined) }, noGrants),
+    ).toEqual(payload)
 
     const forged = { ...envelope, rev: 2 }
     expect(verifyEnvelope(forged, state)).toBe('bad signature')

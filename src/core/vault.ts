@@ -22,6 +22,7 @@ import { heldMembers, Keyring, unwrapOwner } from './keyring'
 import type { Layout } from './layout'
 import { withLock } from './lock'
 import type { EntryName, Field } from './naming'
+import { matchesOnly } from './only'
 import type { EntryPayload } from './payload'
 import { RevisionMarks } from './revisions'
 import { type Tiers, loadState, reach, type VaultState } from './state'
@@ -211,7 +212,7 @@ export class Vault {
           continue
         }
         // One unreadable file must never take the whole vault down with it.
-        const opened = await openEntry(parsed.data, this.#keyring).then(
+        const opened = await openEntry(parsed.data, this.#keyring, matchesOnly).then(
           (payload) => ({ payload }),
           (error: unknown) => {
             if (error instanceof TypeVaultError) return { problem: error.message }

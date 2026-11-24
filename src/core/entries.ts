@@ -4,7 +4,7 @@ import { seal, type SecretKey, sha256Hex, sign, unseal, verifySignature } from '
 import { canonicalJson, fromBase64, type Json, toBase64, utf8 } from './encoding'
 import { TypeVaultError } from './errors'
 import { reach, reachesTier, type VaultState } from './model'
-import { matchesOnly } from './naming'
+import type { EntryName } from './naming'
 import { decodePayload, encodePayload, type EntryPayload } from './payload'
 
 const IssuerSchema = z.discriminatedUnion('kind', [
@@ -197,7 +197,14 @@ export function verifyEnvelope(envelope: Envelope, state: VaultState, options: V
 /** Whatever resolves the current key of a tier: the file-backed `Keyring`, or a store's own unwrapped keys. */
 export type TierKeys = { unlock(tier: string): Promise<SecretKey | undefined> }
 
-export async function openEntry(envelope: Envelope, keyring: TierKeys): Promise<EntryPayload | undefined> {
+/** Whether an entry name falls under a grant's `--only` patterns (the CLI's glob matcher, in `only.ts`). */
+export type OnlyMatcher = (name: EntryName, patterns: readonly string[]) => boolean
+
+export async function openEntry(
+  envelope: Envelope,
+  keyring: TierKeys,
+  matchesOnly: OnlyMatcher,
+): Promise<EntryPayload | undefined> {
   const key = await keyring.unlock(envelope.tier)
   if (key === undefined) return undefined
   const payload = decodePayload(await unseal([key.identity], fromBase64(envelope.payload)))

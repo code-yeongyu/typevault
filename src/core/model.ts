@@ -2,7 +2,6 @@ import type { PublicKey, SecretKey } from './crypto'
 import { sign } from './crypto'
 import { canonicalJson, type Json, utf8 } from './encoding'
 import { TypeVaultError } from './errors'
-import type { Owner } from './owner-trust'
 
 export type Tier = {
   readonly includes: readonly string[]
@@ -39,7 +38,7 @@ export type VaultState = {
   /** The vault's first owner key, its audit identity: signed by the current owner and pinned on this machine. */
   readonly origin: string
   /** The verified handover chain that led to `owner`. */
-  readonly handovers: Owner['handovers']
+  readonly handovers: { from: string; to: { recipient: string; signPublic: string }; sig: string }[]
   /** Each manifest's sequence number: every signed change bumps it, and a lower one is a rollback. */
   readonly seqs: ManifestSeqs
   readonly tiers: Tiers

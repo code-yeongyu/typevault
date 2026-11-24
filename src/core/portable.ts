@@ -23,6 +23,7 @@ export {
   EnvelopeSchema,
   openEntry,
   sealEntry,
+  type OnlyMatcher,
   type SignerContext,
   signerOf,
   signCiphertext,

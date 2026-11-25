@@ -144,6 +144,21 @@ describe('entries without a vault directory', () => {
   })
 })
 
+describe("verification without the reader's clock", () => {
+  test('ignoreClock checks the signature of an envelope written ahead of this clock, and still refuses a forged one', async () => {
+    const { state, tierKey } = await stateWithTier()
+    const ahead = new Date(Date.now() + 60 * 60_000).toISOString()
+    const envelope = await sealEntry(
+      { id: 'mesh.0123456789abcdef0123456789abcdef', tier: 'mesh', rev: 1, at: ahead, payload },
+      state,
+      signerOf(tierKey),
+    )
+    expect(verifyEnvelope(envelope, state)).toBe('timestamp is in the future')
+    expect(verifyEnvelope(envelope, state, { ignoreClock: true })).toBeUndefined()
+    expect(verifyEnvelope({ ...envelope, rev: 9 }, state, { ignoreClock: true })).toBe('bad signature')
+  })
+})
+
 describe('revision ledger', () => {
   test('refuses a revision older than one already seen, and anything after a tombstone', () => {
     const ledger = new RevisionLedger({ a: 2 })

@@ -29,6 +29,7 @@ export {
   signCiphertext,
   type TierKeys,
   verifyEnvelope,
+  type VerifyOptions,
 } from './entries'
 export { type ErrorCode, TypeVaultError } from './errors'
 export {

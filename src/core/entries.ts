@@ -174,7 +174,14 @@ export function signCiphertext(
 const CLOCK_SKEW_MS = 5 * 60_000
 
 /** Why an envelope can't be trusted, or undefined when it can. */
-export type VerifyOptions = { readonly acceptExpiredCerts?: boolean }
+export type VerifyOptions = {
+  readonly acceptExpiredCerts?: boolean
+  /**
+   * Skip the future-timestamp check, for a transport that only decides which copies to keep: it must not drop a
+   * genuine envelope because its writer's clock runs ahead of this one. A reader opening the entry keeps the check.
+   */
+  readonly ignoreClock?: boolean
+}
 
 export function verifyEnvelope(envelope: Envelope, state: VaultState, options: VerifyOptions = {}): string | undefined {
   const tier = state.tiers[envelope.tier]
@@ -182,7 +189,8 @@ export function verifyEnvelope(envelope: Envelope, state: VaultState, options: V
   // The id names its tier, so a file can only ever be replaced by a write its tier's signers could make.
   if (!envelope.id.startsWith(`${envelope.tier}.`)) return `entry id does not belong to tier "${envelope.tier}"`
   if (tier.gen !== envelope.gen) return `stale generation ${envelope.gen} (current ${tier.gen})`
-  if (Date.parse(envelope.at) > Date.now() + CLOCK_SKEW_MS) return 'timestamp is in the future'
+  if (options.ignoreClock !== true && Date.parse(envelope.at) > Date.now() + CLOCK_SKEW_MS)
+    return 'timestamp is in the future'
   const signPublic = signerAuthority(
     envelope.signer,
     envelope.tier,

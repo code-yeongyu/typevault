@@ -9,7 +9,6 @@ import {
   unseal,
 } from './crypto'
 import { fromUtf8, utf8 } from './encoding'
-import { TypeVaultError } from './errors'
 
 export type WrapHolder =
   | { readonly kind: 'owner' }
@@ -46,12 +45,14 @@ export async function openWrap(
   holders: readonly Identity[],
   expected: PublicKey,
 ): Promise<SecretKey | undefined> {
-  const key = await unseal(holders, sealed)
-    .then((bytes) => decodeSecretKey(fromUtf8(bytes)))
-    .catch((error: unknown) => {
-      if (error instanceof TypeVaultError) return undefined
-      throw error
-    })
-  if (key === undefined) return undefined
-  return samePublic(await publicKeyOf(key), expected) ? key : undefined
+  let key: SecretKey
+  try {
+    key = decodeSecretKey(fromUtf8(await unseal(holders, sealed)))
+    // An identity that only looks like one (the decoder checks its prefix) fails here, inside the same guard.
+    return samePublic(await publicKeyOf(key), expected) ? key : undefined
+  } catch (error) {
+    // Not ours, not UTF-8, not a key: every way a planted or corrupt wrap can fail lets the caller try the next one.
+    if (error instanceof Error) return undefined
+    throw error
+  }
 }

@@ -5,7 +5,6 @@ import { randomHex, type SecretKey } from './crypto'
 import { fromUtf8 } from './encoding'
 import {
   type Envelope,
-  type VerifyOptions,
   EnvelopeSchema,
   openEntry,
   sealEntry,
@@ -177,7 +176,8 @@ export class Vault {
   }
 
   /** Every entry this process can open. Untrustworthy files are reported, never returned. */
-  scan(options: VerifyOptions = {}): Promise<Scan> {
+  /** `acceptExpiredCerts` is for explicit owner adoption; a file reader never skips the clock check. */
+  scan(options: { readonly acceptExpiredCerts?: boolean } = {}): Promise<Scan> {
     return withLock(this.layout.lockFile, 'shared', async () => {
       this.refresh()
       const entries: StoredEntry[] = []
@@ -195,7 +195,7 @@ export class Vault {
         }
         const reason =
           file === `${parsed.data.id}.json`
-            ? verifyEnvelope(parsed.data, this.#state, options)
+            ? verifyEnvelope(parsed.data, this.#state, { acceptExpiredCerts: options.acceptExpiredCerts === true })
             : 'file name does not match its entry id'
         if (reason !== undefined) {
           problems.push({ file, reason })

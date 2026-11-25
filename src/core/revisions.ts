@@ -18,6 +18,8 @@ export class RevisionMarks extends RevisionLedger {
   }
 
   save(): void {
-    if (this.dirty) atomicWrite(this.#path, JSON.stringify(this.snapshot()), 0o600)
+    if (!this.dirty) return
+    atomicWrite(this.#path, JSON.stringify(this.snapshot()), 0o600)
+    this.saved()
   }
 }

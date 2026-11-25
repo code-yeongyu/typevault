@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
 import {
@@ -65,6 +67,21 @@ describe('the portable core', () => {
       [...files].map(async (file) => ((await Bun.file(file).text()).includes('Bun.') ? [file] : [])),
     )
     expect(users.flat()).toEqual([])
+  })
+
+  test('the published typevault/core export resolves and bundles for the browser', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tv-export-'))
+    const entry = join(dir, 'entry.ts')
+    await Bun.write(entry, "export { openWrap, sealEntry, verifyEnvelope } from 'typevault/core'\n")
+    await Bun.write(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'consumer', dependencies: { typevault: `file:${resolve(import.meta.dir, '../..')}` } }),
+    )
+    const linked = join(dir, 'node_modules')
+    await Bun.$`mkdir -p ${linked} && ln -s ${resolve(import.meta.dir, '../..')} ${join(linked, 'typevault')}`.quiet()
+    const result = await Bun.build({ entrypoints: [entry], target: 'browser' })
+    expect(result.logs.filter((log) => log.level === 'error')).toEqual([])
+    expect(result.success).toBe(true)
   })
 
   test('bundles for the browser target', async () => {

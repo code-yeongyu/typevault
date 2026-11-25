@@ -65,7 +65,8 @@ function authorityOf(ref: IssuerRef, state: VaultState): Authority | undefined {
       return tier === undefined || tier.gen !== ref.gen ? undefined : { signPublic: tier.signPublic, tiers: [ref.tier] }
     }
     case 'signer':
-      return state.signers[ref.id]
+      // An id is data from the envelope: only the vault's own signers count, never an inherited property.
+      return Object.hasOwn(state.signers, ref.id) ? state.signers[ref.id] : undefined
     default:
       return assertNever(ref)
   }
@@ -158,6 +159,10 @@ export function signCiphertext(
 ): Envelope {
   const tier = state.tiers[draft.tier]
   if (tier === undefined) throw new TypeVaultError('not_found', `no tier "${draft.tier}"`)
+  // Sign only what a receiving vault will accept: the same schema it parses with, and an id that names this tier.
+  const shape = EnvelopeSchema.pick({ id: true, rev: true, at: true }).safeParse(draft)
+  if (!shape.success || !draft.id.startsWith(`${draft.tier}.`))
+    throw new TypeVaultError('invalid', `malformed entry metadata for tier "${draft.tier}"`)
   const authority = signerAuthority(signer.ref, draft.tier, state, draft.at)
   if (authority === undefined) {
     throw new TypeVaultError('denied', `this key cannot sign entries in tier "${draft.tier}"`)
@@ -208,6 +213,12 @@ export type TierKeys = { unlock(tier: string): Promise<SecretKey | undefined> }
 /** Whether an entry name falls under a grant's `--only` patterns (the CLI's glob matcher, in `only.ts`). */
 export type OnlyMatcher = (name: EntryName, patterns: readonly string[]) => boolean
 
+/**
+ * Decrypts an entry and enforces its writing grant's `--only`. It does NOT authenticate the entry. Before calling it, a
+ * receiver must: establish a `VaultState` it trusts (owner-signed, rollback-checked), parse the envelope with
+ * `EnvelopeSchema`, check it with `verifyEnvelope` against that state (keeping the clock check), and refuse a revision
+ * older than one already seen (`RevisionLedger`). The file vault (`Vault.scan`) does all of this.
+ */
 export async function openEntry(
   envelope: Envelope,
   keyring: TierKeys,
